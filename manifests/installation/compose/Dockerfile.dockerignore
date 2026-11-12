@@ -1,0 +1,21 @@
+# BuildKit-specific ignore file for manifests/installation/compose/Dockerfile.
+#
+# The build context is the repository root. Without this file the context would
+# include _output (several GB) and the root-level build artefacts. The root
+# .dockerignore deliberately keeps _output because Dockerfile.runtime-only
+# copies from it; this file only affects the compose build.
+
+_output
+mcpctl
+pg2crd
+oai-scheduledrun-migrator
+
+.git
+.github
+docs
+manifests
+examples
+tmp
+temp
+test-results
+*.md

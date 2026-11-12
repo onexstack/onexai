@@ -1,0 +1,32 @@
+# oai-jobserver for the compose stack.
+#
+# It watches the job/cronjob tables in PostgreSQL through the onexstack watch
+# framework. Kafka is not involved.
+
+coredb:
+  dialect: postgres
+  addr: postgres:5432
+  username: onexai
+  # Supplied through OAI_JOBSERVER_COREDB_PASSWORD.
+  password: ""
+  database: onexai
+  sslmode: disable
+  log-level: 0
+
+watch:
+  healthz-addr: ":8881"
+  metrics-addr: ":9090"
+
+# Required by the option validation. The watcher uses an in-memory fake MinIO,
+# so neither endpoint is contacted; any syntactically valid URL works.
+fake:
+  endpoint: http://127.0.0.1:9999
+  user-agent: oai-jobserver
+  debug: false
+  timeout: 30s
+
+oss:
+  endpoint: http://127.0.0.1:9999
+  user-agent: oai-jobserver
+  debug: false
+  timeout: 30s

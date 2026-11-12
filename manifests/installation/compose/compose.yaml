@@ -1,0 +1,434 @@
+name: onexai
+
+# One-command local/on-prem stack:
+#
+#   cd manifests/installation/compose
+#   cp env.example env        # fill in LLM_BASE_URL / LLM_API_KEY / JWT_KEY
+#   docker compose --env-file env up -d --build
+#
+# Kafka and oai-mqserver are intentionally absent: oai-mqserver registers no
+# topic subscribers and nothing in the repository produces Kafka messages.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-go-build: &go-build
+  context: ../../..
+  dockerfile: manifests/installation/compose/Dockerfile
+
+# Base images for the shared Dockerfile. Override these to use a registry
+# mirror; the defaults are the upstream images.
+x-go-args: &go-args
+  GO_IMAGE: ${GO_IMAGE:-golang:1.27.0}
+  RUNTIME_IMAGE: ${RUNTIME_IMAGE:-debian:bookworm-slim}
+  GOPROXY: ${GOPROXY:-}
+
+x-go-service: &go-service
+  restart: unless-stopped
+  logging: *default-logging
+  read_only: true
+  tmpfs:
+    - /tmp:size=64m
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+# Every service config is a Compose config: the default points at the file in
+# ./configs, and the environment variable lets a user mount a complete
+# replacement without editing this file (see env.example).
+configs:
+  decl-kubeconfig:
+    file: ./configs/declserver.kubeconfig
+  agent-config:
+    file: ${AGENT_CONFIG_FILE:-./configs/oai-agent-apiserver.yaml}
+  chat-config:
+    file: ${CHAT_CONFIG_FILE:-./configs/oai-chat-apiserver.yaml}
+  controller-manager-config:
+    file: ${CONTROLLER_MANAGER_CONFIG_FILE:-./configs/oai-controller-manager.yaml}
+  job-controller-config:
+    file: ${JOB_CONTROLLER_CONFIG_FILE:-./configs/oai-job-controller.yaml}
+  jobserver-config:
+    file: ${JOBSERVER_CONFIG_FILE:-./configs/oai-jobserver.yaml}
+  runtime-json:
+    file: ${RUNTIME_CONFIG_FILE:-./configs/runtime.json}
+
+services:
+  # ---------------------------------------------------------------- infrastructure
+
+  etcd:
+    image: ${ETCD_IMAGE:-quay.io/coreos/etcd:v3.5.15}
+    command:
+      - /usr/local/bin/etcd
+      - --name=etcd
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd:2380
+      - --initial-cluster=etcd=http://etcd:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=onexai
+    volumes:
+      - etcd-data:/etcd-data
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/etcdctl", "--endpoints=http://127.0.0.1:2379", "endpoint", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    logging: *default-logging
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-onexai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-onexai}
+      POSTGRES_DB: ${POSTGRES_DB:-onexai}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-onexai} -d ${POSTGRES_DB:-onexai}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    logging: *default-logging
+
+  # ---------------------------------------------------------------- control plane
+
+  oai-declserver:
+    <<: *go-service
+    image: onexai/oai-declserver:${ONEXAI_VERSION:-dev}
+    build:
+      <<: *go-build
+      args:
+        <<: *go-args
+        SERVICE: oai-declserver
+    command:
+      - --etcd-servers=http://etcd:2379
+      - --etcd-prefix=/registry/onexai.io
+      - --secure-port=6444
+      - --bind-address=0.0.0.0
+      - --cert-dir=/tmp/onexai/certs
+      # The CoreAPI kubeconfig is a hard requirement even though the server
+      # talks to itself. It also bootstraps the aggregator post-start hook.
+      - --kubeconfig=/etc/onexai/declserver.kubeconfig
+      # Authentication and authorization are the kube-apiserver flag sets.
+      # Swap these two for the declarative files, or point the webhooks at the
+      # Agent, when the deployment needs delegated decisions:
+      #   --authentication-config=/etc/onexai/authentication-config.yaml
+      #   --authorization-config=/etc/onexai/authorization-config.yaml
+      #   --authentication-token-webhook-config-file=<kubeconfig>
+      #   --authorization-webhook-config-file=<kubeconfig>
+      # See configs/examples/declserver-webhook.kubeconfig.example.
+      - --authorization-mode=AlwaysAllow
+      - --anonymous-auth=true
+      # Duty groups are now owned by oai-chat-apiserver + PostgreSQL. Keep the
+      # Go types for rollback, but stop serving the resource here.
+      - --runtime-config=chat.onexai.io/v1alpha1/dutygroups=false
+    configs:
+      - source: decl-kubeconfig
+        target: /etc/onexai/declserver.kubeconfig
+    volumes:
+      - decl-data:/data
+    ports:
+      - "127.0.0.1:${DECLSERVER_HOST_PORT:-6444}:6444"
+    depends_on:
+      etcd:
+        condition: service_healthy
+    healthcheck:
+      # /readyz also gates on the aggregator's Service informer, which a
+      # standalone declserver does not serve (it has no core/v1 Services). The
+      # control plane is usable when /healthz passes; the quickstart and
+      # acceptance script use the same probe.
+      test: ["CMD", "curl", "-kfsS", "https://127.0.0.1:6444/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  oai-controller-manager:
+    <<: *go-service
+    image: onexai/oai-controller-manager:${ONEXAI_VERSION:-dev}
+    build:
+      <<: *go-build
+      args:
+        <<: *go-args
+        SERVICE: oai-controller-manager
+    command:
+      - --kubeconfig=/etc/onexai/declserver.kubeconfig
+      - --config=/app/etc/oai-controller-manager.yaml
+      # DutyGroup has no declarative object to reconcile anymore.
+      - --controllers=-dutygroup
+    configs:
+      - source: decl-kubeconfig
+        target: /etc/onexai/declserver.kubeconfig
+      - source: controller-manager-config
+        target: /app/etc/oai-controller-manager.yaml
+    volumes:
+      - controller-data:/data
+    depends_on:
+      oai-declserver:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:20250/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  # ---------------------------------------------------------------- runtime services
+
+  oai-agent-apiserver:
+    <<: *go-service
+    image: onexai/oai-agent-apiserver:${ONEXAI_VERSION:-dev}
+    build:
+      <<: *go-build
+      args:
+        <<: *go-args
+        SERVICE: oai-agent-apiserver
+    command:
+      - --config=/app/etc/oai-agent-apiserver.yaml
+    environment:
+      OAI_AGENT_APISERVER_COREDB_PASSWORD: ${POSTGRES_PASSWORD:-onexai}
+      OAI_AGENT_APISERVER_JWT_KEY: ${JWT_KEY:-onexai-compose-dev-jwt-key-00001}
+      OAI_AGENT_APISERVER_LLM_BASE_URL: ${LLM_BASE_URL:-}
+      OAI_AGENT_APISERVER_LLM_API_KEY: ${LLM_API_KEY:-}
+      OAI_AGENT_APISERVER_LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      OAI_AGENT_APISERVER_LLM_ALLOW_PRIVATE_ENDPOINTS: ${LLM_ALLOW_PRIVATE_ENDPOINTS:-false}
+      OAI_AGENT_APISERVER_AUTH_BYPASS_AKSK: ${AUTH_BYPASS_AKSK:-true}
+      OAI_AGENT_APISERVER_AUTHZ_ENABLED: ${AUTHZ_ENABLED:-false}
+      OAI_AGENT_APISERVER_REDIS_ADDR: redis:6379
+    extra_hosts:
+      # Lets LLM_BASE_URL point at an Ollama running on the host.
+      - host.docker.internal:host-gateway
+    configs:
+      - source: decl-kubeconfig
+        target: /etc/onexai/declserver.kubeconfig
+      - source: agent-config
+        target: /app/etc/oai-agent-apiserver.yaml
+    volumes:
+      - agent-data:/data
+    ports:
+      - "127.0.0.1:${AGENT_HOST_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      oai-declserver:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  oai-chat-apiserver:
+    <<: *go-service
+    image: onexai/oai-chat-apiserver:${ONEXAI_VERSION:-dev}
+    build:
+      <<: *go-build
+      args:
+        <<: *go-args
+        SERVICE: oai-chat-apiserver
+    command:
+      - --config=/app/etc/oai-chat-apiserver.yaml
+    environment:
+      OAI_CHAT_APISERVER_COREDB_PASSWORD: ${POSTGRES_PASSWORD:-onexai}
+      OAI_CHAT_APISERVER_JWT_KEY: ${JWT_KEY:-onexai-compose-dev-jwt-key-00001}
+      OAI_CHAT_APISERVER_AGENT_AKSK_API_KEY: ${CHAT_AKSK_API_KEY:-oai-chat-apiserver}
+      OAI_CHAT_APISERVER_AGENT_AKSK_SECRET_KEY: ${CHAT_AKSK_SECRET:-onexai-compose-chat-dev-secret}
+      OAI_CHAT_APISERVER_LARK_APP_ID: ${LARK_APP_ID:-}
+      OAI_CHAT_APISERVER_LARK_APP_SECRET: ${LARK_APP_SECRET:-}
+    configs:
+      - source: decl-kubeconfig
+        target: /etc/onexai/declserver.kubeconfig
+      - source: chat-config
+        target: /app/etc/oai-chat-apiserver.yaml
+    volumes:
+      - chat-data:/data
+    ports:
+      - "127.0.0.1:${CHAT_HOST_PORT:-8082}:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      oai-declserver:
+        condition: service_healthy
+      oai-agent-apiserver:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8082/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  oai-job-controller:
+    <<: *go-service
+    image: onexai/oai-job-controller:${ONEXAI_VERSION:-dev}
+    build:
+      <<: *go-build
+      args:
+        <<: *go-args
+        SERVICE: oai-job-controller
+    command:
+      - --config=/app/etc/oai-job-controller.yaml
+    environment:
+      OAI_JOB_CONTROLLER_AGENT_AKSK_API_KEY: ${JOB_AKSK_API_KEY:-oai-job-controller}
+      OAI_JOB_CONTROLLER_AGENT_AKSK_SECRET_KEY: ${JOB_AKSK_SECRET:-onexai-compose-job-dev-secret}
+    configs:
+      - source: decl-kubeconfig
+        target: /etc/onexai/declserver.kubeconfig
+      - source: job-controller-config
+        target: /app/etc/oai-job-controller.yaml
+    volumes:
+      - job-controller-data:/data
+    depends_on:
+      oai-declserver:
+        condition: service_healthy
+      oai-agent-apiserver:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  oai-jobserver:
+    <<: *go-service
+    image: onexai/oai-jobserver:${ONEXAI_VERSION:-dev}
+    build:
+      <<: *go-build
+      args:
+        <<: *go-args
+        SERVICE: oai-jobserver
+    command:
+      - --config=/app/etc/oai-jobserver.yaml
+    environment:
+      OAI_JOBSERVER_COREDB_PASSWORD: ${POSTGRES_PASSWORD:-onexai}
+    configs:
+      - source: jobserver-config
+        target: /app/etc/oai-jobserver.yaml
+    volumes:
+      - jobserver-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8881/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  oai-agent-runtime:
+    <<: *go-service
+    image: onexai/oai-agent-runtime:${ONEXAI_VERSION:-dev}
+    build:
+      <<: *go-build
+      args:
+        <<: *go-args
+        SERVICE: oai-agent-runtime
+    # The runtime spawns one CLI process per request.
+    init: true
+    command:
+      - --config=/config/runtime.json
+      - --addr=:8080
+    configs:
+      - source: runtime-json
+        target: /config/runtime.json
+    volumes:
+      - runtime-data:/data
+      - runtime-workspace:/workspace
+    ports:
+      - "127.0.0.1:${RUNTIME_HOST_PORT:-8090}:8080"
+    healthcheck:
+      # The A2A runtime has no /healthz; the agent card is its readiness signal.
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/.well-known/agent-card.json"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  # ---------------------------------------------------------------- optional secure profile
+  #
+  # Enable with:
+  #   AUTH_BYPASS_AKSK=false AUTHZ_ENABLED=true \
+  #   docker compose --env-file env --profile secure up -d
+  #
+  # seed-aksk writes the two caller secrets after the agent service has run
+  # AutoMigrate. seed-authz applies the sample RuntimeProfile/Agent and the
+  # AuthorizationRule that lets it run.
+
+  seed-aksk:
+    image: postgres:16-alpine
+    profiles: ["secure"]
+    restart: "no"
+    # The postgres image's entrypoint starts a database; this one-shot service
+    # only runs the seed script.
+    entrypoint: ["/bin/sh", "/seed/seed.sh"]
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-onexai}
+      POSTGRES_USER: ${POSTGRES_USER:-onexai}
+      POSTGRES_DB: ${POSTGRES_DB:-onexai}
+      CHAT_SECRET: ${CHAT_AKSK_SECRET:-onexai-compose-chat-dev-secret}
+      JOB_SECRET: ${JOB_AKSK_SECRET:-onexai-compose-job-dev-secret}
+    volumes:
+      - ./seed-aksk/seed.sh:/seed/seed.sh:ro
+      - ./seed-aksk/aksk.sql:/seed/aksk.sql:ro
+    depends_on:
+      oai-agent-apiserver:
+        condition: service_healthy
+    logging: *default-logging
+
+  seed-authz:
+    image: rancher/kubectl:v1.31.4
+    profiles: ["secure"]
+    restart: "no"
+    entrypoint: ["kubectl"]
+    command:
+      - --kubeconfig=/config/declserver.kubeconfig
+      - apply
+      - -f
+      - /seed/
+    volumes:
+      - ./configs:/config:ro
+      - ./seed:/seed:ro
+    depends_on:
+      oai-declserver:
+        condition: service_healthy
+    logging: *default-logging
+
+volumes:
+  etcd-data:
+  pgdata:
+  redis-data:
+  decl-data:
+  controller-data:
+  agent-data:
+  chat-data:
+  job-controller-data:
+  jobserver-data:
+  runtime-data:
+  runtime-workspace:

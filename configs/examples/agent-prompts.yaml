@@ -1,0 +1,24 @@
+# Ordered prompt bindings.
+#
+# The controller merges promptRef ∪ prompts ∪ promptSelector into the derived
+# aggregated-<agent> Prompt, and the runtime prefers that object whenever it
+# exists. While it is being (re)created — a new agent, an upgrading controller —
+# the runtime walks this list in the order written here and uses the first
+# Prompt that exists, is enabled and has content. A missing or disabled entry is
+# skipped, not treated as the end of the list.
+#
+# promptSelector has no runtime fallback: only the controller can list Prompts,
+# so selector matches reach the runtime through the aggregated Prompt alone.
+apiVersion: agent.onexai.io/v1alpha1
+kind: Agent
+metadata:
+  name: sre-assistant
+  namespace: default
+spec:
+  enabled: true
+  displayName: SRE assistant
+  description: Answers operational questions.
+  prompts:
+    - name: sre-guardrails
+    - name: sre-runbooks
+    - name: sre-style

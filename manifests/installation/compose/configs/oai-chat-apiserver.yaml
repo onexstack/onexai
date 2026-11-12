@@ -1,0 +1,91 @@
+# oai-chat-apiserver for the compose stack.
+#
+# Lark credentials are optional. Without them the HTTP surface still starts; the
+# bot simply does not connect. Secrets come from the environment.
+
+insecure:
+  addr: ":8082"
+
+coredb:
+  dialect: postgres
+  addr: postgres:5432
+  username: onexai
+  # Supplied through OAI_CHAT_APISERVER_COREDB_PASSWORD.
+  password: ""
+  database: onexai
+  sslmode: disable
+  log-level: 0
+
+# Required by the option validation. Neither endpoint is contacted at startup.
+fake:
+  endpoint: http://127.0.0.1:9999
+  user-agent: oai-chat-apiserver
+  debug: false
+  timeout: 30s
+
+oss:
+  endpoint: http://127.0.0.1:9999
+  user-agent: oai-chat-apiserver
+  debug: false
+  timeout: 30s
+
+auth:
+  anonymous-auth: false
+  authorization-mode: ""
+
+jwt:
+  # Supplied through OAI_CHAT_APISERVER_JWT_KEY. Must match the agent service,
+  # or /v1/admin tokens minted here are refused there.
+  key: ""
+  expired: "24h"
+
+lark:
+  app-id: ""
+  app-secret: ""
+  url: "https://open.larksuite.com"
+  event-mode: "websocket"
+  verification-token: ""
+  bot-name: "Helper"
+
+agent:
+  endpoint: "http://oai-agent-apiserver:8080"
+  timeout: "3m"
+  retry-count: 2
+
+agent-aksk:
+  api-key: "oai-chat-apiserver"
+  # Supplied through OAI_CHAT_APISERVER_AGENT_AKSK_SECRET_KEY.
+  secret-key: ""
+
+chat:
+  # OIDC-compatible token issuance. Off by default; when enabled it publishes
+  # /.well-known/openid-configuration and /keys for a Kubernetes authenticator.
+  oidc:
+    enabled: false
+    issuer-url: ""
+    audiences: []
+    key-file: ""
+    key-id: ""
+    token-ttl: "1h"
+
+  session:
+    data-dir: /data/sessions
+  # No seeded agents exist in the default stack, so leave @default pointing
+  # nowhere rather than naming an agent that does not exist.
+  internal-default: ""
+  external-default: ""
+
+controlplane:
+  kubeconfig: /etc/onexai/declserver.kubeconfig
+  namespace: ""
+  sync-timeout: 30s
+  resync-period: 60s
+
+store:
+  read-backend: controlplane
+  read-backends: {}
+  mirror:
+    schema: mirror
+    max-lag: "10m"
+    count-mode: exact
+  get-cache-size: 10000

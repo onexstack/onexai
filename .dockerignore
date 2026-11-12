@@ -1,0 +1,12 @@
+# 构建上下文只需要：Dockerfile、Makefile/脚本，以及 _output/platforms/<os>/<arch>/ 下
+# 那颗**已经被本机编好的**二进制。其余（.git、文档、测试夹具）都不参与构建。
+#
+# 注意**不要**排除 _output：Dockerfile.runtime-only 的 COPY 正是从那里取产物的。
+# 排除它会让构建以「找不到文件」失败，而不是静默。
+.git
+.github
+docs
+tmp
+*.md
+temp
+test-results

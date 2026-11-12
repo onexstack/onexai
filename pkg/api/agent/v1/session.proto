@@ -1,0 +1,114 @@
+// Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// This file defines the Protobuf messages for agent conversations.
+//
+// A session is one conversation with one agent set. It is pinned to the runtime
+// and revision it started on, so editing an agent never rewrites a conversation
+// that is already in progress.
+//
+syntax = "proto3"; // Specifies the syntax version used in this package.
+
+package agent.v1;
+
+option go_package = "github.com/onexstack/onexai/pkg/api/agent/v1;v1";
+
+// Session is one conversation.
+message Session {
+    // id is the conversation key the client sends with every turn.
+    string id = 1;
+    string namespace = 2;          // Namespace the agent belongs to.
+    string agent = 3;              // Agent the conversation runs.
+    // runtimeKind and runtimeProfile are the runtime this conversation is
+    // pinned to. They are fixed at creation: switching runtimes means a new
+    // conversation, because a resumed task lives on the runtime that started it.
+    string runtimeKind = 4;
+    string runtimeProfile = 5;
+    // runtimeInstance is the hosting instance the conversation is bound to.
+    // Empty for an in-process runtime.
+    string runtimeInstance = 6;
+    // revisionId is the compiled agent revision the conversation runs. An agent
+    // edited after this point does not change an existing conversation.
+    string revisionId = 7;
+    string owner = 8;              // Subject the conversation belongs to.
+    string name = 9;               // Human-facing name, if the caller set one.
+    string state = 10;             // "ready" | "running" | "suspended"
+    int64 lastActiveAt = 11;       // unix milliseconds
+    int64 createdAt = 12;          // unix milliseconds
+}
+
+// SessionMessage is one turn of a conversation.
+message SessionMessage {
+    int64 seq = 1;                 // Position in the conversation, from one.
+    string role = 2;               // "user" | "assistant" | "tool"
+    string content = 3;
+    string images = 4;             // JSON array of image references, if any.
+    int64 createdAt = 5;           // unix milliseconds
+}
+
+// SessionShare is one read-only grant on a conversation.
+message SessionShare {
+    string id = 1;
+    string sessionId = 2;
+    string createdBy = 3;
+    int64 createdAt = 4;           // unix milliseconds
+    int64 expiresAt = 5;           // unix milliseconds
+}
+
+message ForkSessionRequest {
+    // id is the conversation to copy.
+    string id = 1;
+    // upToSeq copies only messages up to this sequence number. Zero copies
+    // everything.
+    int64 upToSeq = 2;
+    string name = 3;               // Name for the new conversation.
+}
+
+message ForkSessionResponse {
+    Session session = 1;
+}
+
+message CreateSessionShareRequest {
+    string id = 1;                 // Conversation to share.
+    int32 expiresInSeconds = 2;    // Lifetime of the token; zero means the default.
+    string name = 3;               // Optional label for the grant.
+}
+
+message CreateSessionShareResponse {
+    SessionShare share = 1;
+    // token is the credential the grant is redeemed with. It is returned once,
+    // on creation: only a hash is stored, so a lost token is reissued rather
+    // than read back.
+    string token = 2;
+    // url is the absolute read path the token unlocks.
+    string url = 3;
+}
+
+message ListSessionShareRequest {
+    // @gotags: uri:"id"
+    string id = 1;
+}
+
+message ListSessionShareResponse {
+    repeated SessionShare shares = 1;
+}
+
+message RevokeSessionShareRequest {
+    // @gotags: uri:"id"
+    string id = 1;                 // Conversation the grant belongs to.
+    // @gotags: uri:"shareID"
+    string shareId = 2;            // Grant to revoke.
+}
+
+message RevokeSessionShareResponse {}

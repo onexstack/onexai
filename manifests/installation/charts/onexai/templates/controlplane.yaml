@@ -1,0 +1,129 @@
+{{- /*
+声明式控制面的机密与连接配置。`controlplane.enabled=false` 时整份文件不渲染，
+chart 与在此之前完全一致。
+
+四份 Secret 的分工：
+
+  oai-declserver-etcd        连 etcd 的客户端证书。**只在 declserver 一个 Pod 挂载** ——
+                             etcd 没有对象级鉴权，持有它等于持有整个集群的读写权。
+  oai-declserver-tls         declserver 自己的服务端证书。SAN 必须覆盖 Service 名，
+                             否则客户端的严格校验会失败（而不是悄悄降级）。
+  oai-declserver-tokens      token-auth-file。用户 oai-runtime（运行时）与
+                             oai-controller-manager（控制器）。
+  oai-controlplane-kubeconfig 两份客户端配置合成的 kubeconfig，运行时与控制器共用。
+
+值全部来自 -f ~/.onexai/controlplane-values.yaml（由 controlplane-certs.sh 生成），
+不进 git，也不进 chart 的 values.yaml。
+*/ -}}
+{{- if .Values.controlplane.enabled }}
+{{- $cp := .Values.controlplane }}
+{{- $ns := .Release.Namespace }}
+{{- $svc := "oai-declserver" }}
+{{- $s := $cp.secrets }}
+{{- if not $s }}
+{{- fail "controlplane.enabled=true 但没有 controlplane.secrets：请用 -f ~/.onexai/controlplane-values.yaml 带上证书与 token" }}
+{{- end }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: oai-declserver-etcd
+  labels:
+    app: {{ $svc }}
+    {{- include "onexai.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  ca.pem: |
+{{ required "controlplane.secrets.etcd.ca 缺失" $s.etcd.ca | indent 4 }}
+  client.pem: |
+{{ required "controlplane.secrets.etcd.cert 缺失" $s.etcd.cert | indent 4 }}
+  client-key.pem: |
+{{ required "controlplane.secrets.etcd.key 缺失" $s.etcd.key | indent 4 }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: oai-declserver-tls
+  labels:
+    app: {{ $svc }}
+    {{- include "onexai.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  tls.crt: |
+{{ required "controlplane.secrets.tls.crt 缺失" $s.tls.crt | indent 4 }}
+  tls.key: |
+{{ required "controlplane.secrets.tls.key 缺失" $s.tls.key | indent 4 }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: oai-declserver-tokens
+  labels:
+    app: {{ $svc }}
+    {{- include "onexai.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  # token-auth-file 的 CSV 格式：token,user,uid,"group1,group2"
+  #
+  # 两枚 token 都放进 system:masters：declserver 启动时把 cluster-admin 预绑给这个
+  # 组，所以它们拿到的是「这个 API server 里的全部权限」。这是有意的 —— 运行时要
+  # CRUD 十来个 kind、还要写 status 子资源，控制器的范围更宽（namespace 控制器、
+  # GC、ClusterRole aggregation）。而 declserver 是个**封闭宇宙**：这里的 cluster-admin
+  # 不触达真实集群，它只覆盖 /onexai.io 下的对象。
+  #
+  # 不自己建 ClusterRoleBinding 的原因：建绑定的请求本身需要权限，而 bootstrap 之前
+  # 谁都没有 —— 那是个先有鸡还是先有蛋的循环，system:masters 正是它的解法。
+  tokens.csv: |
+    {{ required "controlplane.secrets.runtimeToken 缺失" $s.runtimeToken }},oai-runtime,oai-runtime,"system:masters"
+    {{ required "controlplane.secrets.controllerToken 缺失" $s.controllerToken }},oai-controller-manager,oai-controller-manager,"system:masters"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: oai-controlplane-kubeconfig
+  labels:
+    app: {{ $svc }}
+    {{- include "onexai.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  # 两份 kubeconfig，只有用户不同：运行时用 runtimeToken，控制器用 controllerToken。
+  # 分开是为了能单独吊销一个而不动另一个 —— 两枚 token 权限相同（都是 system:masters，
+  # 即 declserver 这个封闭宇宙里的 cluster-admin），差别只在「谁在用」。
+  kubeconfig: |
+    apiVersion: v1
+    kind: Config
+    clusters:
+    - name: onexai
+      cluster:
+        server: https://{{ $svc }}.{{ $ns }}.svc:443
+        # 用签发这张服务端证书的 CA，而不是证书本身：证书不是自己的签发者。
+        certificate-authority-data: {{ required "controlplane.secrets.tls.ca 缺失" $s.tls.ca | b64enc }}
+    users:
+    - name: oai-runtime
+      user:
+        token: {{ required "controlplane.secrets.runtimeToken 缺失" $s.runtimeToken }}
+    contexts:
+    - name: onexai
+      context:
+        cluster: onexai
+        user: oai-runtime
+    current-context: onexai
+  kubeconfig-controller: |
+    apiVersion: v1
+    kind: Config
+    clusters:
+    - name: onexai
+      cluster:
+        server: https://{{ $svc }}.{{ $ns }}.svc:443
+        certificate-authority-data: {{ required "controlplane.secrets.tls.ca 缺失" $s.tls.ca | b64enc }}
+    users:
+    - name: oai-controller-manager
+      user:
+        token: {{ required "controlplane.secrets.controllerToken 缺失" $s.controllerToken }}
+    contexts:
+    - name: onexai
+      context:
+        cluster: onexai
+        user: oai-controller-manager
+    current-context: onexai
+{{- end }}

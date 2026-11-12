@@ -1,0 +1,442 @@
+insecure:
+  addr: ":9181"
+  mode: "release"
+
+coredb:
+  dialect: postgres
+  addr: {{ .Values.config.coredbAddr }}
+  username: onexai
+  password: "{{ .Values.config.coredbPassword }}"
+  database: infra_onexai
+  sslmode: disable
+  log-level: 0
+
+# Authentication and authorization.
+#
+# anonymous-auth and authorization-mode: AlwaysAllow are refused at startup.
+auth:
+  anonymous-auth: false
+  # Empty means "validate the token normally". AlwaysDeny is not the stricter
+  # version of that: it refuses every request, a valid token included, which is
+  # what made the JWT-gated routes answer 403 to everyone. The management
+  # surface under /v1/admin is unreachable while it is set.
+  authorization-mode: ""
+  # false = every /v1 request must carry a valid AK/SK signature. Set true only
+  # for local development without oai-chat-apiserver in front of this server.
+  bypass-aksk: false
+  # /v1/core/secrets 与 /v1/agent/authorizationrules 的第二道门，必须与 OneX 的
+  # oai-agent.control-token（~/.onex/ox-agent-apiserver.yaml）逐字节相同。
+  # 留空即关闭；两边不一致时 OneX 的 agent 开通会 403。
+  control-token: ""
+  # TokenReview / SubjectAccessReview 原生评审端点的调用方 Bearer Token。
+  # 留空 = 端点返回 503；控制台 /v1 评审走登录 JWT，不受此项影响。
+  webhook-token: ""
+  # Kubernetes 结构化认证配置路径；留空表示只使用平台 HS256 令牌。
+  authentication-config: ""
+
+# Multi-level (Agent/Tool/Resource) authorization. Ported from os-apiserver's
+# Kubernetes-style authz; rules live in coredb's oai_authz_rule table.
+authz:
+  enabled: true
+  # Path to an apiserver.config.k8s.io/v1 AuthorizationConfiguration. When set,
+  # its webhook authorizers replace authz.webhook.endpoints.
+  authorization-config: ""
+  rule-table-refresh-interval: 60s
+  opa:
+    enabled: true
+  cmdb:
+    # The CMDB backend is an unimplemented placeholder (same as upstream prod).
+    enabled: false
+  webhook:
+    enabled: false
+  casdoor:
+    enabled: false
+    timeout: 3s
+
+jwt:
+  # Must not be the built-in placeholder; the server refuses to start otherwise.
+  #
+  # This key must be the same value as oai-chat-apiserver.yaml's: that service
+  # mints the token and this one validates it. Two different keys is a login
+  # that works followed by a 401 that looks like a broken login.
+  key: "{{ .Values.config.jwtKey }}"
+  # The option is `expired` (it binds onexstack's JWTOptions.Expired); the
+  # `expiry` spelling this file used to carry was silently ignored.
+  expired: "24h"
+im-backend: lark
+
+lark:
+  app-id: "{{ .Values.config.larkAppId }}"
+  app-secret: {{ .Values.config.larkAppSecret }}
+  url: "https://open.feishu.cn"
+  event-mode: "websocket"   # websocket | webhook
+  verification-token: ""
+
+openim:
+  api-addr: "http://localhost:10002"
+  ws-addr:  "ws://localhost:10001"
+  admin-user-id: "imAdmin"
+  secret: "{{ .Values.config.openimSecret }}"
+
+database:
+  dsn: ""
+
+# LLM backend for /askai — leave base_url empty to disable
+llm:
+  #base-url: "https://opencode.ai/zen/v1"                   # e.g. https://api.openai.com/v1
+  #model:    "gpt-4o-mini"        # model name
+  #model:    "mimo-v2.5-free"        # model name
+  base-url: "https://api.deepseek.com"                   # e.g. https://api.openai.com/v1A
+  api-key:  "{{ .Values.config.llmApiKey }}"                   # your OpenAI / compatible API key
+  #model:    "gpt-4o-mini"        # model name
+  model:    "deepseek-v4-flash"        # model name
+  # 一次生成最多多少 token。输出价 4 元/M 是缓存命中输入（0.02 元/M）的 200 倍，
+  # 不封顶就是让最贵的那一项跑满模型的窗口。8192 是缺省档；agent.max-output-tokens
+  # 可按调用方场景覆盖它，代码里的 model.WithMaxTokens 优先级最高。
+  max-tokens: 8192
+  # 用户端点是本进程去请求的：私网/回环地址默认拒绝（自建 Ollama 才开启）。
+  allow-private-endpoints: false
+  # 一次连通性测试的上限。
+  test-timeout: "15s"
+
+# 模型端点存储：用户密钥 AES-GCM 加密落库。本地用固定 32 字节 key。
+model:
+  api-key-encryption-key: "{{ .Values.config.modelKeyEncryptionKey }}"
+
+log:
+  level: "info"
+  format: "json"
+
+fake:
+  endpoint: http://127.0.0.1
+oss:
+  endpoint: http://127.0.0.1
+otel:
+  endpoint: 127.0.0.1:4327
+  service-name: oai-agent-apiserver
+  output-mode: classic
+  level: debug
+  add-source: false
+  use-prometheus-endpoint: true
+  slog: # 只有 --otel.user-native-slog 为 true 时配置才生效
+    format: text # 只有output-mod为slog时生效
+    time-format: "2006-01-02 15:04:05" # 只有output-mod为slog时生效
+    output: stdout # 只有output-mod为slog时生效
+
+# --- added 2026-09-27: MCP tools (see oai_ai_mcp) -----------------------------
+# Previously absent, so store.source stayed "" (resource store disabled, so
+# MCPs().List() was always empty) and agent.engine stayed at its "http" default,
+# which has no tool loop at all. Both sections are spelled out in full for the
+# sake of the reader: NewServerOptions pre-populates every default before the
+# file is overlaid, so omitting a key keeps its default rather than zeroing it.
+agent:
+  # Root of the per-agent skill checkouts. Empty turns the whole skill subsystem
+  # off: /v1/agent/agents/:name/context-skills then answers 404 ("skills are not
+  # configured on this deployment"), so an agent's as_cmd=Yes skills never reach
+  # the chat's /help. It also gates the deep agent's sandboxed filesystem/shell
+  # tools, whose allow-list root is this directory.
+  skills-dir: "/data/skills"
+  engine: "eino"                 # eino (adk agent + tools); the http engine was removed
+  chat-model: ""
+  fallback-model: ""
+  max-retries: 2
+  retry-backoff: "500ms"
+  max-concurrent-per-conversation: 3
+  run-timeout: "5m"
+  tool-timeout: "2m"
+  mcp-enabled: true
+  mcp-discovery-timeout: "15s"
+  mcp-cache-ttl: "5m"
+  # 自定义命令（http 类型）的出站边界。
+  custom-command:
+    allowed-hosts: []
+    allow-plain-http: false
+    allow-private-hosts: false
+    max-timeout: 60s
+    max-response-bytes: 1048576
+    max-redirects: 2
+  tool-search:
+    enabled: false
+    min-tools: 40
+    always-visible: []
+  agents-md:
+    enabled: false
+    files: ["AGENTS.md"]
+    max-bytes: 16384
+    per-file-max-bytes: 8192
+  multimodal-read:
+    enabled: false
+  model-guard:
+    qps: 0
+    burst: 1
+    failure-threshold: 0
+    cooldown: "30s"
+  show-reasoning: false
+  # 检索片段逐用户水印（默认关闭）。key 是 `ox-kbtrace --key <capability key>
+  # --print-subkey` 输出的 base64 子密钥；它只能写标记，不能签 capability 令牌。
+  # watermark:
+  #   enabled: true
+  #   key: ""
+  max-image-pixels: 0         # shrink an image larger than this before a model sees it; 0 = send the original
+  # --- 成本控制（2026-10-10）---------------------------------------------------
+  # 单条工具输出进 prompt 的上限，单位字符。默认 50000 会让一次检索把整页内容
+  # 反复重发：一次 6 轮的工具循环等于把它发 6 遍。
+  #
+  # 2026-10-15：12000 → 16000。它是**检索渲染预算的天花板**（见下面
+  # agent.ragflow.max-chars），必须高于后者：这条超限时的切法是"留头留尾、
+  # 丢掉中间"，而检索结果按相关度排序，中间正是最该留的证据；更糟的是被它切掉的
+  # 文档仍然会出现在来源上报里，来源面板因此会声称一次并未发生的阅读。
+  # 两个数的关系由 buildKnowledgeBaseTools 强制、由 warnRetrievalBudget 在启动时点名。
+  max-tool-output-chars: 16000
+  # 输出封顶按调用方场景分档。default 是没人点名时用的那一档；
+  # surface-keys 把调用方 AK/SK 的 api-key（即服务名）映射到下面的场景名。
+  # 不填 surface-keys 时所有人都走 default —— 分档不会悄悄按错的档位生效。
+  max-output-tokens:
+    default: 8192
+    lark: 2048                # 飞书群聊/私聊：答案是卡片，长答案读不完
+    onex: 16384               # 控制台与社区回复：可能写文档、贴代码
+  surface-keys:
+    "oai-chat-apiserver": lark
+    "onex-agent-apiserver": onex
+  # 单用户单日 token 上限（0 = 关闭）。与 max-retries 上面那条 daily-quota 是两条
+  # 不同的闸门：那条数「问了几次」，这条数「花了多少」——一次带知识库的问答可能抵得上
+  # 一百句问候，所以只数次数挡不住账单。检查在 run 开始前、扣减在 run 结束后
+  # （token 只有答完才知道），因此允许超出上限一个 run，下次就被拒。
+  # 打开前先看 scripts/agent-cost-report.sql 的历史水位，别拍一个比正常消耗还低的数。
+  daily-token-quota: 0
+  # 执行期 webhook 的兜底名单：agent 自己没有声明钩子时，用这里的名字（webhook
+  # 表里的行，通过 POST /v1/webhooks 管理）。留空即表示「没声明就没检查」。
+  # 这是给「没人配过的 agent」兜底的：onex 建 agent 时会把钩子名写上去，但用别的
+  # 方式建出来的 agent 否则会完全不做准入检查——而且是静默的，因为「没钩子」和
+  # 「放行」看起来一模一样。
+  webhook-defaults: []
+  # 出图（drawing）。留空即为关闭，也是当前状态：不配 model 就没有 generate_image
+  # 工具，/v1/images/generations 也会以"未配置"拒绝。要开启就填一个能出图的模型
+  # —— DeepSeek 不出图，需要另配 base-url / api-key / model。
+  #
+  # 开启之后，模型在对话里可以调用 generate_image 画图，画出的图片会先落进上面的
+  # media 存储、再作为一条消息发回飞书或回给控制台。
+  image-model:
+    model: ""
+    base-url: ""              # empty = inherit llm.base-url
+    api-key: ""               # empty = inherit llm.api-key
+  enable-tracing: false
+
+  # --- added 2026-10-04: knowledge bases ---------------------------------------
+  # Knowledge bases are assembled by the agent builder from the run's
+  # KnowledgeBases; the platform below is the only switch a deployment needs.
+
+  # The RAGFlow platform the `kb-src-*` records address
+  # (agent.knowledge_base.platform = "ragflow"). base-url empty disables it, and
+  # a base-url without an api-key is rejected at startup.
+  #
+  # NOTE: ragflow-api is a ClusterIP service in `onexai-system`, and this machine can
+  # reach that ClusterIP directly (there is a route into the cluster, so a
+  # port-forward is *not* needed):
+  #   curl http://ragflow.example.com:9380/api/v1/system/version
+  #   -> HTTP 200 in ~40ms, measured 2026-10-04
+  #
+  # The scheme is load-bearing. onexai builds the endpoint as
+  #   strings.TrimRight(BaseURL, "/") + "/api/v1/retrieval"
+  # and Go's url.Parse reads "host:port" as *scheme* + *opaque* — "ragflow-api…" is
+  # a legal scheme — leaving Host empty. The transport then refuses with
+  #   unsupported protocol scheme "ragflow.example.com"
+  # before a single packet is sent, so every retrieval fails. And it fails
+  # *silently*: retriever.go drops a failing retriever without logging, so the
+  # model is told "No relevant information found in the knowledge base." and
+  # answers that the knowledge base has nothing — while the console, which talks
+  # to RAGFlow directly, answers fine. Keep the http://.
+  kb-multiquery:
+    enabled: false
+    count: 2
+    sample-rate: 0
+  ragflow:
+    base-url: "http://ragflow.example.com:9380"
+    api-key: "{{ .Values.config.ragflowApiKey }}"
+    top-k: 5                     # caps the merged result across all queried datasets
+    # 检索结果渲染进 prompt 的字符上限（单位：字符）。
+    #
+    # 2026-10-15：30000 → 12000。改动理由是**单位**与**位置**：
+    #  - 单位：render 原来用 sb.Len() 比，那是字节；agent.max-tool-output-chars
+    #    数的是字符。中文下 30000 字节≈10000 字符，于是"通用截断器会不会啃掉
+    #    检索结果"取决于正文里 CJK 与 ASCII 的比例——一个随内容漂移的间歇缺陷。
+    #    render 现在也数字符，两个上限在同一把尺子上。
+    #  - 位置：render 的切在文档边界且会写"(more results omitted)"；工具输出上限
+    #    的切在中间。检索按相关度排序，中间是最该留的证据。
+    # 两者关系由 buildKnowledgeBaseTools 强制（留 10% 余量），warnRetrievalBudget
+    # 在启动时点名。有效预算因此从"12000 且被剪掉中段"变成"12000 完整"。
+    max-chars: 12000
+    timeout: "30s"
+    # Deliberately below RAGFlow's own default of 0.2, and it must be non-zero:
+    # the request field is `omitempty`, so 0 is dropped from the body and the
+    # server's 0.2 applies. Measured 2026-10-04 on the kb-src-kbi-LIVE2 dataset:
+    # the question "2026-W39 周会内容是什么" scores the W39 page 0.1989 — under
+    # 0.2 — while a same-named *template* page scores 0.2019. At the default the
+    # template is the only chunk returned, so the model sees no meeting content
+    # and answers "no relevant information found". At 0.1 the real page is
+    # returned (ranked 2nd of 5).
+    similarity-threshold: 0.1
+    vector-similarity-weight: 0  # 0 keeps RAGFlow's own default (0.3)
+    # 留空 = 关闭重排，也是当前状态：**租户里根本没有 rerank 模型**。
+    # 2026-10-15 实测：GET /api/v1/models?type=rerank 返回空，租户下只有 DeepSeek
+    # 的 chat 模型；/api/v1/all-models 那 3800+ 条是候选目录，不代表已安装。
+    # 要开就得先往租户里加一个 rerank provider（TEI 的 bge-reranker-v2-m3，或
+    # Jina/Cohere/Voyage 的 key），这是基础设施动作，不是配置翻转。
+    #
+    # 配错会硬失败：模型名解析不到时 RAGFlow 返回 code=102
+    # （"cannot be used as rerank model"），而 OneX 把 code!=0 当错误，于是**整个
+    # 知识库工具报错**，不是降级。填之前先 GET 列表核对。
+    rerank-id: ""
+    # 2026-10-15：打开。RAGFlow 自己会 LLM 抽关键词并拼进查询，代价是平台侧多一次
+    # chat 模型调用。线上实测可用（code 0）。
+    keyword: true
+    # 是否把 RAGFlow 的文档名当"来源"给模型看。
+    #
+    # 现在是 false，因为 kbragsync 把文档名写成了 node_id（kbn-XXXXXX）——那是标识符
+    # 不是标题，放进 Source 只是噪音。等 onex 侧把文档名改成"课程 · 章节"之后再打开，
+    # 那时它就是免费的章节名（RAGFlow 每个 chunk 都回传 document_keyword）。
+    document-name-as-source: false
+
+  # 检索结果分级：渲染前多一次模型调用，按"哪段真的回答了问题"重排、丢掉判为无关的
+  # 片段，并把覆盖度（充分/部分/无）告诉模型。它同时顶替重排器——RAGFlow 的 rerank
+  # 要租户先装 rerank 模型，这台没有（见上面 rerank-id 的注释）。
+  #
+  # 2026-10-15：打开，用主模型。base-url / api-key 留空即继承 llm.*。
+  # 它刻意**不复用 reviewer-model**：配 reviewer-model 会连带打开出站安全审查
+  # （那条通道没有自己的开关），于是"想开分级"会静默变成"改写每一个回答"。
+  kb-grade-model:
+    model: "deepseek-v4-flash"
+    # base-url: ""              # empty = inherit from llm.base-url
+    # api-key: ""               # empty = inherit from llm.api-key
+
+  # 回答校验：拿最终答案去比对**本次检索真正读到的材料**，只在答案
+  # ①把材料不支持的说法说成来自课程、或 ②与材料明显矛盾却没说明时，追加一句提醒。
+  # 它**不改写**答案——改写等于给读者第二份答案，而且那份是在上下文更少的情况下产出的。
+  #
+  # 为什么需要它：提示词只是**声明**了材料与模型自有知识谁优先，没有任何东西核实模型
+  # 是否照做；而这条链路最容易出的错（日志显示查了课程、答案其实出自模型记忆）
+  # 从外面看和"有据可依"长得一模一样。
+  #
+  # 只在本次真的检索到材料时才跑，所以不检索的问答不多花这一次调用。
+  grounding-model:
+    model: "deepseek-v4-flash"
+    # base-url: ""              # empty = inherit from llm.base-url
+    # api-key: ""               # empty = inherit from llm.api-key
+  # Agent-to-Agent（A2A）对外面。面本身恒开：三条路由在任何部署里都存在，
+  # 客户端据此区分"不提供"与"地址写错"；没有 agent 引擎时每个任务都会被拒。
+  # 卡片固定在源站根路径 /.well-known/agent-card.json（不在 /v1/chat/a2a 下），
+  # 公开可读；它指向的两个接口都要 AK/SK 签名，卡片里用 apiKey + 一个扩展声明签名头。
+  #
+  # a2a-public-url 是卡片对外发布的两个**接口**的绝对基地址，不是卡片自身位置。
+  # 留空则卡片带相对路径：同源取卡的客户端可用，严格的客户端不可用。不要用请求头
+  # 推导地址——卡片路由无鉴权，伪造 Host 就能把对端指向别处；确实全流量都过自控
+  # 代理时再打开 trusted-proxy。
+  a2a-public-url: ""
+  a2a-trusted-proxy: false
+  a2a-default-agent: ""        # A2A 请求未指定 agent 时的默认 agent 集；空 = 服务自身默认
+  a2a-description: ""          # 卡片描述；空则回落到 agent.description，再回落到通用文案
+
+
+store:
+  read-backend: controlplane
+  read-backends: {}
+  mirror:
+    schema: mirror
+    max-lag: "10m"
+    count-mode: exact
+  get-cache-size: 10000
+  source: "sql"
+  refresh-interval: "5m"
+
+# 用量上报：把本服务跑完的 run 写回 OneX 的账本（控制台「用量中心」读的就是它）。
+#
+# 为什么需要它：OneX 自己发起的 run（控制台、社区回复）由 ox-agent-apiserver 消费
+# 事件后自行记账，不用这里上报；但飞书机器人是直连本服务的，那条链路的消耗过去只进
+# Prometheus 与卡片页脚，帐本里查不到。打开这一段之后，飞书群聊的消耗才落进
+# agent.usage_record。token 必须与 /etc/onex/ox-agent-apiserver.yaml 的
+# internal-api.token 逐字节相同；两者半填都会被启动检查拒绝。
+usage-report:
+  endpoint: "{{ .Values.config.usageReportEndpoint }}"
+  token: "{{ .Values.config.usageReportToken }}"
+  timeout: "5s"
+
+# Image storage: where the bytes of an uploaded or generated image live, and how
+# a remote image is fetched.
+#
+# local keeps the objects in a directory on this machine, which is what a
+# single-node deployment wants. cos keeps them in a Tencent COS bucket, which is
+# what a deployment with more than one replica needs: a second replica's
+# directory is empty, while every replica can reach a bucket. Setting the driver
+# to "" disables image storage, and the service then still answers every text
+# request.
+#
+# The bucket here is not publicly readable, so the object URLs this service
+# renders are not meant to be fetched by a client: image bytes are read back
+# through GET /v1/assets/:assetID/content, which is authenticated and works the
+# same whichever driver is configured.
+#
+# prefix namespaces this service's keys inside the bucket. Changing it later
+# moves where objects are written but not where the stored references point, so
+# the bytes have to be moved with it.
+#
+# oai-chat-apiserver has no media block on purpose: it stores nothing itself, it
+# hands an image to this service and keeps only the reference.
+media:
+  driver: cos                 # local | cos | "" (disabled)
+  bucket-url: onexai-prod-gz-oss-1254073058.cos.ap-guangzhou.myqcloud.com
+  prefix: "/agent"
+  secret-id: {{ .Values.config.mediaSecretId }}
+  secret-key: {{ .Values.config.mediaSecretKey }}
+  data-dir: ""                # local only; empty = <home>/.onexai/media
+  public-base-url: ""         # empty = object URLs use the bucket domain
+  sign-key: ""                # local only; empty = unsigned object URLs
+  max-fetch-bytes: 0          # 0 = package default (12 MiB)
+  # How long a stored image is kept. "0s" means never, which is the default:
+  # the number is a policy (how long a user's screenshot stays readable in a
+  # conversation they can still scroll back to), not a tuning knob this code
+  # should pick. It is stamped when the image is stored, so raising it later
+  # applies to what comes next rather than expiring images kept under the old
+  # value.
+  #
+  # It is a Go duration string, so it must parse: an empty value is a startup
+  # error, not "unset". Write "0s".
+  retention: "0s"              # e.g. "720h" for 30 days; "0s" = keep for ever
+  # The collector that reclaims expired images. Off until a retention is set:
+  # deleting a picture is not recoverable.
+  gc-enabled: false
+  gc-interval: "1h"
+  gc-batch: 200
+  allow-private-hosts: false  # on only if images live on an internal host
+
+# Redis for agent sessions, cross-pod stop signaling, and the AK/SK nonce store.
+#
+# The server, the ACL user and the database are the ones ox-notify-apiserver
+# already uses, so this deployment has one Redis to look after rather than two.
+# Keys are prefixed (`key-prefix` below), so nothing here can meet anything
+# notify wrote, and the server runs `maxmemory-policy noeviction` — a full
+# server refuses a write rather than evicting another service's keys.
+redis:
+  addr: "127.0.0.1:6379"
+  username: "onexai"
+  password: "{{ .Values.config.redisPassword }}"
+  database: 6
+  # Tighter than the scaffold defaults: the session read and the nonce check are
+  # both on the request path, so an unreachable server must become a refused
+  # request quickly rather than one that hangs.
+  dial-timeout: 2s
+  read-timeout: 1s
+  write-timeout: 1s
+  max-retries: 1
+  key-prefix: "onexai"
+  session-ttl: "24h"
+
+controlplane:
+  kubeconfig: "/etc/onexai/controlplane/kubeconfig"
+  namespace: ""
+  # Runtime settings an operator edits without a redeploy, e.g.
+  #   kubectl -n default create configmap oai-agent-settings --from-literal=sys_prompt='...'
+  # Read through the informer, so the edit applies to the next run. An absent
+  # ConfigMap or key just means the configuration file is the only source.
+  settings-configmap: oai-agent-settings
+  sync-timeout: 30s
+  resync-period: 60s

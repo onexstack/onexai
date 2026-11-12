@@ -1,0 +1,78 @@
+// Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// This file defines the Protobuf messages for managing RuntimeProfiles.
+//
+syntax = "proto3"; // Specifies the syntax version used in this file.
+
+package agent.v1;
+
+option go_package = "github.com/onexstack/onexai/pkg/api/agent/v1;v1";
+
+import "agent/v1/clientconfig.proto";
+
+// RuntimeProfile is the runtime contract an agent runs against.
+message RuntimeProfile {
+    string name = 1;
+    string namespace = 2;
+    string displayName = 3;
+    string status = 4;
+    string description = 5;
+    string owner = 6;
+    string kind = 7;
+    string endpoint = 8;
+    string hostingRef = 9;
+    string modelAccess = 10;
+    string authBearerSecret = 11;
+    string authBearerKey = 12;
+    string authCASecret = 13;
+    string authCAKey = 14;
+    bool authInsecureVerify = 15;
+    int64 runTimeoutNanos = 16;
+    int32 maxConcurrentRun = 17;
+    int32 maxToolCalls = 18;
+    string resolvedEndpoint = 19;
+    string capabilities = 20;
+    map<string, string> labels = 21;
+    int64 createdAt = 22;
+    int64 updatedAt = 23;
+    // clientConfig is the shared Kubernetes-shaped endpoint configuration. It
+    // replaces endpoint when set.
+    ClientConfig clientConfig = 24;
+}
+
+message CreateRuntimeProfileRequest { RuntimeProfile runtimeProfile = 1; }
+message CreateRuntimeProfileResponse { RuntimeProfile runtimeProfile = 1; }
+message UpdateRuntimeProfileRequest { RuntimeProfile runtimeProfile = 1; }
+message UpdateRuntimeProfileResponse { RuntimeProfile runtimeProfile = 1; }
+message DeleteRuntimeProfileRequest {
+    // @gotags: uri:"name"
+    string name = 1;
+}
+message DeleteRuntimeProfileResponse {}
+message GetRuntimeProfileRequest {
+    // @gotags: uri:"name"
+    string name = 1;
+}
+message GetRuntimeProfileResponse { RuntimeProfile runtimeProfile = 1; }
+message ListRuntimeProfileRequest {
+    // @gotags: form:"offset"
+    int32 offset = 1;
+    // @gotags: form:"limit"
+    int32 limit = 2;
+}
+message ListRuntimeProfileResponse {
+    repeated RuntimeProfile runtimeProfiles = 1;
+    int64 count = 2;
+}

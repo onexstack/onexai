@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: oai-mqserver
+  labels:
+    app: oai-mqserver
+spec:
+  type: NodePort
+  selector:
+    app: oai-mqserver
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 5555
+  externalTrafficPolicy: Cluster
+  internalTrafficPolicy: Cluster
+  sessionAffinity: None
+  ipFamilyPolicy: SingleStack
+  ipFamilies:
+  - IPv4

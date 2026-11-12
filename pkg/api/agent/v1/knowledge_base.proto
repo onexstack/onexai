@@ -1,0 +1,157 @@
+// Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// This file defines the Protobuf messages for managing knowledge bases.
+//
+syntax = "proto3"; // Specifies the syntax version used in this file.
+
+package agent.v1;
+
+option go_package = "github.com/onexstack/onexai/pkg/api/agent/v1;v1";
+
+// KnowledgeBase represents an external knowledge base (RAG dataset).
+message KnowledgeBase {
+    // 11 was the knowledge-question platform's projectId and 12 was the
+    // pre-rename spelling of namespace; both are removed and must not be
+    // reused.
+    reserved 11, 12;
+
+    string name = 1;
+    string displayName = 2;
+    string description = 3;
+    string status = 4;
+    string datasetId = 5;
+    double scoreThreshold = 6;
+    int32 topK = 7;
+    map<string, string> labels = 8;
+    int64 createdAt = 9;
+    int64 updatedAt = 10;
+    // namespace is the object's namespace; empty = default.
+    string namespace = 14;
+    // platform names the retrieval backend this record addresses:
+    // "dify" | "ragflow". Empty means "not stated", and the agent resolves it
+    // from DatasetID — see types.KnowledgeBaseM.InferPlatform.
+    //
+    // It is a field rather than a rule about DatasetID because DatasetID
+    // cannot tell a Dify dataset from a RAGFlow one, and the failure is
+    // silent — the record is simply queried against the wrong platform, or
+    // never queried at all.
+    string platform = 13;
+}
+
+message CreateKnowledgeBaseRequest { KnowledgeBase knowledgeBase = 1; }
+message CreateKnowledgeBaseResponse { KnowledgeBase knowledgeBase = 1; }
+message UpdateKnowledgeBaseRequest { KnowledgeBase knowledgeBase = 1; }
+message UpdateKnowledgeBaseResponse { KnowledgeBase knowledgeBase = 1; }
+message DeleteKnowledgeBaseRequest {
+    // @gotags: uri:"name"
+    string name = 1;
+}
+message DeleteKnowledgeBaseResponse {}
+message GetKnowledgeBaseRequest {
+    // @gotags: uri:"name"
+    string name = 1;
+}
+message GetKnowledgeBaseResponse { KnowledgeBase knowledgeBase = 1; }
+message ListKnowledgeBaseRequest {
+    // offset is how many records to skip before the page. It is ignored when
+    // limit is zero, because that request asks for the whole list.
+    // @gotags: form:"offset"
+    int32 offset = 1;
+
+    // limit caps how many records the page holds. Zero means no limit, which is
+    // what this endpoint returned before it supported paging.
+    // @gotags: form:"limit"
+    int32 limit = 2;
+}
+message ListKnowledgeBaseResponse {
+    repeated KnowledgeBase knowledgeBases = 1;
+
+    // count is the total number of knowledge bases, independent of the page returned.
+    int64 count = 2;
+}
+
+// KnowledgeBaseRetrievalHit is one passage returned by a retrieval test.
+//
+// It carries what the platform reported, not what the model would be shown:
+// content is untruncated and no watermark is applied, because the caller is a
+// person debugging a dataset rather than a model reading a tool result.
+message KnowledgeBaseRetrievalHit {
+    // chunkId is the platform's identity for the passage itself.
+    string chunkId = 1;
+    // documentName is the document name the platform reports, or its document
+    // id when the platform reports no name. Empty only when neither exists.
+    string documentName = 2;
+    // content is the passage itself, untruncated.
+    string content = 3;
+    // score is the platform's blend of vector and term similarity. It orders
+    // the result; it is not an absolute quality claim.
+    double score = 4;
+    // vectorScore is the vector-only similarity, or 0 when the platform does
+    // not report it.
+    double vectorScore = 5;
+}
+
+// TestKnowledgeBaseRetrievalRequest runs one debug retrieval against a stored
+// knowledge base.
+//
+// The optional knobs override the record's and the deployment's values for
+// this one call. They are `optional` so that "not sent" is distinguishable
+// from an explicit 0: a threshold of 0 means "let RAGFlow use its own
+// default", which is a different request from "use the deployment's 0.1".
+message TestKnowledgeBaseRetrievalRequest {
+    // @gotags: uri:"name"
+    string name = 1;
+    // query is the question to retrieve for.
+    string query = 2;
+    // topK is how many passages to return. 0 means the record's topK, then 5.
+    int32 topK = 3;
+    // scoreThreshold is the minimum similarity a passage must score.
+    optional double scoreThreshold = 4;
+    // vectorSimilarityWeight weights vector similarity against term
+    // similarity (RAGFlow's dense weight).
+    optional double vectorSimilarityWeight = 5;
+    // rerank asks for the deployment's rerank model. True requires
+    // agent.ragflow.rerank-id: a deployment without one refuses the request
+    // rather than silently returning an unranked result.
+    optional bool rerank = 6;
+    // keyword asks RAGFlow to extract keywords from the query and search with
+    // them as well. It costs the platform one extra model call.
+    optional bool keyword = 7;
+}
+
+// TestKnowledgeBaseRetrievalResponse reports one retrieval test.
+//
+// A platform failure is `ok=false` with a readable message, not an HTTP error:
+// the request was valid, the upstream was not. That is the same contract
+// TestModelResponse and TestMCPResponse follow.
+message TestKnowledgeBaseRetrievalResponse {
+    // ok is true when the platform answered, even if it found nothing.
+    bool ok = 1;
+    // message explains a failed test. It never carries the platform's address.
+    string message = 2;
+    repeated KnowledgeBaseRetrievalHit hits = 3;
+    // tookMs is how long the platform call took.
+    int64 tookMs = 4;
+    // The values that actually ran, echoed so the console can show them.
+    int32 topK = 5;
+    double scoreThreshold = 6;
+    double vectorSimilarityWeight = 7;
+    bool rerank = 8;
+    bool keyword = 9;
+    // platform is the resolved retrieval backend ("ragflow").
+    string platform = 10;
+    // rerankModel names the rerank model that ran; empty when none did.
+    string rerankModel = 11;
+}

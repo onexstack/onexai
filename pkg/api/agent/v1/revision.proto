@@ -1,0 +1,63 @@
+// Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// This file defines the Protobuf messages for compiled agent revisions.
+//
+// A revision is the digest-addressed identity of everything that decides how a
+// run behaves: the rendered prompt, the model, the capability set and the
+// runtime. A conversation pins one, so editing an agent changes the next
+// conversation rather than the one in progress.
+//
+syntax = "proto3"; // Specifies the syntax version used in this package.
+
+package agent.v1;
+
+option go_package = "github.com/onexstack/onexai/pkg/api/agent/v1;v1";
+
+// Revision is one compiled identity an agent has executed.
+message Revision {
+    // id is a name-based UUID derived from the digest, so the same inputs
+    // compile to the same id on any process.
+    string id = 1;
+    string namespace = 2;
+    string agent = 3;
+    // digest is the sha256 of the normalized inputs. It is what tells two
+    // revisions apart; the id is only a stable name for one.
+    string digest = 4;
+    // spec is the normalized input, in JSON. It is what the revision was
+    // compiled from, kept so a run can be explained without the store it ran
+    // against.
+    string spec = 5;
+    int64 createdAt = 6;           // unix milliseconds
+}
+
+message ListRevisionRequest {
+    // agent filters by agent name; empty lists every agent's revisions.
+    string agent = 1;
+    // limit caps the page. Zero returns every revision.
+    int32 limit = 2;
+}
+
+message ListRevisionResponse {
+    repeated Revision revisions = 1;
+}
+
+message GetRevisionRequest {
+    // id is the revision to read.
+    string id = 1;
+}
+
+message GetRevisionResponse {
+    Revision revision = 1;
+}

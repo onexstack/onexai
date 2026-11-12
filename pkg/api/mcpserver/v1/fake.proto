@@ -1,0 +1,23 @@
+// Fake data API example used by the MCP server tests.
+syntax = "proto3";
+
+package mcpserver.v1;
+
+option go_package = "github.com/onexstack/onexai/pkg/api/mcpserver/v1;v1";
+
+// FakeData represents a mock entity with diverse fields for testing.
+message FakeData {
+    // ID is the entity identifier.
+    string ID = 1;
+    // name is the display name.
+    string name = 2;
+    // category groups the entity.
+    string category = 3;
+    // description is free-form text.
+    string description = 4;
+    // status is the lifecycle state.
+    string status = 5;
+
+    // score maps to float64 in Go.
+    double score = 7;
+}

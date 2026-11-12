@@ -1,0 +1,76 @@
+// Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// This file defines the Protobuf messages for managing ReferenceGrants.
+//
+syntax = "proto3"; // Specifies the syntax version used in this file.
+
+package agent.v1;
+
+option go_package = "github.com/onexstack/onexai/pkg/api/agent/v1;v1";
+
+// ReferenceGrantFrom identifies the referrer side of a grant. It deliberately
+// has no name: which concrete agents receive a capability is decided by
+// AgentBinding / ClusterAgentBinding.
+message ReferenceGrantFrom {
+    string group = 1;
+    string kind = 2;
+    string namespace = 3;
+}
+
+// ReferenceGrantTo identifies the target side. An empty name means every
+// object of this kind in the grant's namespace.
+message ReferenceGrantTo {
+    string group = 1;
+    string kind = 2;
+    string name = 3;
+}
+
+// ReferenceGrant permits objects in the listed namespaces to reference objects
+// in this grant's namespace.
+message ReferenceGrant {
+    string name = 1;
+    string namespace = 2;
+    repeated ReferenceGrantFrom from = 3;
+    repeated ReferenceGrantTo to = 4;
+    map<string, string> labels = 5;
+    int64 createdAt = 6;
+    int64 updatedAt = 7;
+}
+
+message CreateReferenceGrantRequest { ReferenceGrant referenceGrant = 1; }
+message CreateReferenceGrantResponse { ReferenceGrant referenceGrant = 1; }
+message UpdateReferenceGrantRequest { ReferenceGrant referenceGrant = 1; }
+message UpdateReferenceGrantResponse { ReferenceGrant referenceGrant = 1; }
+message DeleteReferenceGrantRequest {
+    // @gotags: uri:"name"
+    string name = 1;
+}
+message DeleteReferenceGrantResponse {}
+message GetReferenceGrantRequest {
+    // @gotags: uri:"name"
+    string name = 1;
+}
+message GetReferenceGrantResponse { ReferenceGrant referenceGrant = 1; }
+message ListReferenceGrantRequest {
+    // @gotags: form:"offset"
+    int32 offset = 1;
+
+    // @gotags: form:"limit"
+    int32 limit = 2;
+}
+message ListReferenceGrantResponse {
+    repeated ReferenceGrant referenceGrants = 1;
+    int64 count = 2;
+}

@@ -1,0 +1,45 @@
+name: Bug report
+description: Report a problem in onexai
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please do not include secrets, tokens, or private endpoints.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v0.1.0 / commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - oai-agent-apiserver
+        - oai-agent-runtime
+        - oai-chat-apiserver
+        - oai-declserver
+        - oai-controller-manager
+        - oai-jobserver
+        - oai-mqserver
+        - oai-mcpserver
+        - docs / build
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the observed and expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Minimal steps, configuration (redacted), logs, or a failing test.
+    validations:
+      required: true

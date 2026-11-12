@@ -1,0 +1,719 @@
+// Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// This file defines the Protobuf messages for managing AI Agents.
+//
+syntax = "proto3"; // Specifies the syntax version used in this file.
+
+package agent.v1;
+
+// ImageRef is the reference an image travels as. It lives in asset.proto with
+// the rest of the media contract; the run requests and events below carry it.
+import "agent/v1/a2a.proto";
+import "agent/v1/asset.proto";
+import "github.com/onexstack/defaults/defaults.proto";
+import "google/protobuf/duration.proto";
+
+// Specifies the Go package for generated code.
+option go_package = "github.com/onexstack/onexai/pkg/api/agent/v1;v1";
+
+// ObjectReference points at one object of this API group. The kind is implied by
+// the field that carries it (skills hold Skills, mcps hold MCPServers). An empty
+// namespace means the referrer's own namespace, which is the only form an Agent
+// spec may use; cross-namespace references belong in a Binding.
+message ObjectReference {
+    // namespace is the referenced object's namespace. Empty means the
+    // referrer's namespace.
+    optional string namespace = 1;
+
+    // name is the referenced object's name.
+    string name = 2;
+}
+
+// Agent represents an AI agent: its persona (system prompt) and the sets of
+// skills, MCP servers and knowledge bases it may use.
+message Agent {
+    // 6 was the deprecated single-value sysPrompt; 14 was the pre-rename
+    // spelling of namespace. Both are removed and must not be reused.
+    reserved 6, 14;
+
+    // name is the unique agent name.
+    string name = 1;
+    // displayName is the human-readable name.
+    string displayName = 2;
+    // status is "enabled" | "disabled".
+    string status = 3;
+    // description is a short description.
+    string description = 4;
+    // owner is the owning user/team.
+    string owner = 5;
+    // skills lists the skills the agent may use.
+    repeated ObjectReference skills = 7;
+    // mcps lists the MCP servers the agent may use.
+    repeated ObjectReference mcps = 8;
+    // knowledgeBases lists the knowledge bases the agent may use.
+    repeated ObjectReference knowledgeBases = 9;
+    // requireApproval lists the tool-name patterns this agent's runs must get a
+    // human's approval for before executing: an exact tool name, a "delete_*"
+    // prefix glob, or "*" for every tool. It adds to what the agent's MCP
+    // servers and the server-wide default already require, and can never remove
+    // from them. Empty means this agent declares nothing of its own.
+    repeated string requireApprovals = 13;
+    // labels are the object's own Kubernetes labels: the selection space a
+    // rule, a workload or `kubectl -l` addresses it in. They are validated by
+    // the API server like any other object's labels.
+    map<string, string> labels = 10;
+    // createdAt is the creation timestamp (unix millis).
+    int64 createdAt = 11;
+    // updatedAt is the last-update timestamp (unix millis).
+    int64 updatedAt = 12;
+    // namespace is the object's namespace: the business-line partition this
+    // agent belongs to. Empty means the default (see model.DefaultNamespace).
+    string namespace = 18;
+    // prompts lists the Prompt names this agent falls back to, in order, while
+    // the controller's aggregated prompt is not available. Names resolve in the
+    // agent's namespace. Empty means the engine's default instruction. The
+    // aggregated prompt, when present, always wins.
+    repeated ObjectReference prompts = 19;
+    // authzBackends is a JSON array string selecting the authz backends this
+    // agent is evaluated against at the Agent level (e.g. ["opa"], or ["none"]).
+    string authzBackends = 15;
+    // model optionally pins this agent to a configured model endpoint
+    // (agent.model.name). Empty means the run resolves the request model, then
+    // this field, then the deployment default.
+    ObjectReference model = 16;
+    // customCommands lists the user-defined slash commands this agent exposes.
+    // A command appears in /help when it is bound here and enabled.
+    repeated ObjectReference customCommands = 17;
+    // templateRefs lists the AgentTemplate names this agent references, in
+    // precedence order. A template must live in the agent's namespace. An
+    // absent list means "no opinion"; an empty list clears the binding.
+    repeated ObjectReference templateRefs = 20;
+
+    // kind is native or external. Empty means native.
+    string kind = 21;
+    // execution selects the execution backend.
+    AgentExecution execution = 22;
+    // contract is the common, externally visible contract.
+    AgentContract contract = 23;
+    // calls is the legacy declarative list. It is persisted but not executed;
+    // use delegates for agent-as-tool delegation.
+    repeated string calls = 24;
+    // sharing controls cross-namespace use of an external agent.
+    AgentSharing sharing = 25;
+    // a2a is the observed A2A state. Empty for native in-process agents.
+    AgentA2AStatus a2a = 26;
+    // phase is Pending, Ready, Degraded, Error or Disabled.
+    string phase = 27;
+    // source is card-url, json, manual or runtime for external agents.
+    string source = 28;
+    string protocolVersion = 29;
+    string transport = 30;
+    // endpoint is the resolved A2A endpoint.
+    string endpoint = 31;
+    string cardVersion = 32;
+    string cardDigest = 33;
+    int64 cardFetchedAt = 34;
+    // capabilities is the flattened capability list for list/table rendering.
+    repeated string capabilities = 35;
+    // skillNames is the flattened skill name list for list/search.
+    repeated string skillNames = 36;
+    int32 skillCount = 37;
+    // memoryRef names the Memory this agent uses. Empty means memory is off.
+    ObjectReference memoryRef = 38;
+    // delegates names the agents this agent may call as tools through the
+    // agent_invoke_agent capability. A delegate runs as its own run with its
+    // own prompt, model, skills and session; only the request text and answer
+    // cross the boundary. Empty means the agent cannot delegate.
+    repeated ObjectReference delegates = 39;
+
+    // resolvedModel is the model the controller resolved from the agent's own
+    // modelRef, its template, or a binding. It is read-only; the spec field is
+    // `model`.
+    string resolvedModel = 40;
+
+    // webhooks names the run-lifecycle hooks called around this agent's runs.
+    // A nil list is "no opinion" (a declaration made with kubectl survives an
+    // unrelated console update); an explicit empty list clears it. Webhooks are
+    // platform-side governance rather than agent behaviour, so an external
+    // agent may carry them too: its runs are gated by the same onStart hook.
+    repeated string webhooks = 41;
+
+    // authnWebhooks names authentication Webhooks (Kubernetes TokenReview)
+    // that authenticate callers of this agent's invocation entries. Non-empty
+    // replaces the platform authentication chain for this agent; AK/SK remains
+    // platform-verified. Empty means platform authentication.
+    repeated string authnWebhooks = 42;
+
+    // authzWebhooks names authorization Webhooks (Kubernetes
+    // SubjectAccessReview) that decide whether a caller may use this agent.
+    // Non-empty replaces platform authorization (including authzBackends) for
+    // this agent. Empty means platform authorization.
+    repeated string authzWebhooks = 43;
+}
+
+// CreateAgentRequest is the request to create an agent.
+message CreateAgentRequest {
+    Agent agent = 1;
+}
+
+// CreateAgentResponse is the response for a created agent.
+message CreateAgentResponse {
+    Agent agent = 1;
+}
+
+// UpdateAgentRequest is the request to update an agent.
+message UpdateAgentRequest {
+    Agent agent = 1;
+}
+
+// UpdateAgentResponse is the response for an updated agent.
+message UpdateAgentResponse {
+    Agent agent = 1;
+}
+
+// DeleteAgentRequest is the request to delete an agent by name.
+message DeleteAgentRequest {
+    // @gotags: uri:"name"
+    string name = 1;
+}
+
+// DeleteAgentResponse is the response for a deleted agent.
+message DeleteAgentResponse {}
+
+// GetAgentRequest is the request to retrieve an agent by name.
+message GetAgentRequest {
+    // @gotags: uri:"name"
+    string name = 1;
+}
+
+// GetAgentResponse is the response for a retrieved agent.
+message GetAgentResponse {
+    Agent agent = 1;
+}
+
+// ListAgentRequest is the request to list agents.
+message ListAgentRequest {
+    // offset is how many agents to skip before the page. It is ignored when
+    // limit is zero, because that request asks for the whole list.
+    // @gotags: form:"offset"
+    int32 offset = 1;
+
+    // limit caps how many agents the page holds. Zero means no limit, which is
+    // what this endpoint returned before it supported paging.
+    // @gotags: form:"limit"
+    int32 limit = 2;
+}
+
+// ListAgentResponse is the response listing all agents.
+message ListAgentResponse {
+    repeated Agent agents = 1;
+
+    // count is the total number of agents, independent of the page returned.
+    int64 count = 2;
+}
+
+// ContextSkill is one skill an agent has exposed as a command.
+//
+// It is not a Skill: that message describes a repository record, and one record
+// can hold several skills. What a person types after the slash is the skill's
+// own name, which lives inside the repository and is only knowable by having
+// the skill subsystem list it.
+message ContextSkill {
+    // name is what is typed after the slash.
+    string name = 1;
+    // description is what a menu shows. It is the skill's own summary, falling
+    // back to the repository's when the skill does not carry one.
+    string description = 2;
+    // repo is the skill record the skill was found in, so a menu can say where
+    // a command comes from.
+    string repo = 3;
+    // provider is that record's kind (github, gitlab, lark_doc). It
+    // is a label on the command, so a caller can offer every skill from one
+    // kind without naming them.
+    string provider = 4;
+}
+
+// ListContextSkillResponse is the answer to
+// GET /v1/agents/{name}/context-skills.
+//
+// Only the skills marked as commands are listed. A skill that is not marked is
+// still available to the model; it is simply not something a person types.
+message ListContextSkillResponse {
+    repeated ContextSkill skills = 1;
+}
+
+// AgentToolStep is a single tool invocation in the agent progress log. It
+// mirrors the backend-neutral agent.ToolStep so the chat can render tool
+// panels without importing the agent internal packages.
+message AgentToolStep {
+    // name is the tool name.
+    string name = 1;
+    // status is "pending" | "ok" | "fail".
+    string status = 2;
+    // durationMs is the elapsed time of the invocation in milliseconds.
+    int64 durationMs = 3;
+    // tokens is how many prompt tokens the invocation's result added to the
+    // context, derived from the model calls around it. It is 0 until the call
+    // that follows reports its usage, and stays 0 when the upstream reports
+    // none: an OpenAI-compatible API reports usage per model call and has no
+    // per-tool granularity, so this is a derived figure rather than a measured
+    // one. Tools invoked in the same parallel batch share a single value.
+    int32 tokens = 4;
+    // id is the model's tool-call id for this invocation. It is stable across an
+    // approval pause and resume, so a renderer updates a row in place instead of
+    // appending a duplicate, and it is how a later event carries this step's
+    // tokens.
+    string id = 5;
+    // result is what the tool returned, truncated at the emitter. It is what
+    // makes a claim about a tool's effect checkable against the tool rather than
+    // against the model's own prose: a card that says a release was triggered
+    // shows the trigger's own output beside it, and the two contradicting each
+    // other on one screen is the point. Empty for a step that is still pending,
+    // and for a result the emitter dropped as too large.
+    string result = 6;
+}
+
+// AgentInterruptRequest is one call a paused run is waiting on.
+message AgentInterruptRequest {
+    // address is the interrupt point's fully-qualified ID. It is what an answer
+    // targets, and the framework generates it fresh for each pause, so a caller
+    // must read it from here rather than reconstruct it.
+    string address = 1;
+    // toolName is the tool whose execution is pending.
+    string toolName = 2;
+    // question is the human-readable prompt shown to the user.
+    string question = 3;
+    // options are the selectable answers for a "question" interrupt.
+    repeated string options = 4;
+    // multiSelect indicates the user may pick multiple options.
+    bool multiSelect = 5;
+    // kind is "permission" (default) or "question".
+    string kind = 6;
+    // arguments is the JSON the model asked to run the tool with, as the model
+    // produced it. It is what turns an approval from "may I use pipeline?" into a
+    // decision about a specific change, which is the only kind of approval worth
+    // asking for: the same tool with different arguments is a different action.
+    //
+    // It is carried raw because it is the model's own output and the caller that
+    // shows it to a person is the one that knows who that person is. Redaction
+    // belongs there, at the point the text is rendered, and not here — this field
+    // is also what a caller reads to reconstruct the call it is approving.
+    //
+    // Empty for a question interrupt, and for a permission whose call reported no
+    // arguments.
+    string arguments = 7;
+}
+
+// AgentInterrupt describes a human-approval pause emitted by the agent: the
+// run halted awaiting a decision before it may proceed.
+//
+// It carries every call the run is waiting on, not one: a single assistant
+// message can call several tools at once and the approval policy can gate more
+// than one of them. eino merges those into a single interrupt, and a run resumed
+// with only some of them answered pauses again on the rest — so the group is
+// presented together and answered with one decision.
+message AgentInterrupt {
+    // requestID identifies this pause, not the run: a run that pauses twice has
+    // two. An answer must name it, so a decision made against a card the run has
+    // already moved past is refused rather than applied to whatever the run
+    // happens to be waiting on now.
+    string requestID = 1;
+    // requests are the pending calls, one per interrupt point.
+    repeated AgentInterruptRequest requests = 2;
+}
+
+// AgentUsage reports the token usage an agent run has accumulated.
+//
+// The totals cover every model call the run made, including each round of a tool
+// loop, so prompt tokens are counted once per round rather than once per run:
+// the total is what the run consumed, not the size of its final context.
+message AgentUsage {
+    // promptTokens is the accumulated prompt token count.
+    int32 promptTokens = 1;
+    // completionTokens is the accumulated completion token count.
+    int32 completionTokens = 2;
+    // totalTokens is the accumulated total, prompt plus completion.
+    int32 totalTokens = 3;
+    // reasoningTokens is the accumulated reasoning token count.
+    int32 reasoningTokens = 4;
+    // calls is the number of model calls the totals cover.
+    int32 calls = 5;
+    // cacheHitTokens and cacheMissTokens split promptTokens into the share the
+    // upstream served from its own prefix cache and the share it computed.
+    //
+    // They are the difference between knowing what a run cost and guessing: the
+    // cached share of the input bills at a fiftieth of the uncached share on
+    // DeepSeek (0.02 元/M against 1 元/M), and the split is decided entirely by
+    // whether the request prefix stayed stable between rounds. A caller that
+    // only sees promptTokens cannot tell a cheap run from an expensive one.
+    //
+    // Both are 0 for an upstream that does not report the split, which today is
+    // every provider but DeepSeek — so 0 means "not reported" rather than
+    // "nothing was cached".
+    int32 cacheHitTokens = 6;
+    int32 cacheMissTokens = 7;
+}
+
+// AgentEventType enumerates the kinds of events an agent run streams.
+enum AgentEventType {
+    // agentEventTypeUnspecified is the zero value.
+    agentEventTypeUnspecified = 0;
+    // agentEventTypeProgress carries the current tool-execution log (steps).
+    agentEventTypeProgress = 1;
+    // agentEventTypeToolStep carries a single updated tool step (steps[0]).
+    agentEventTypeToolStep = 2;
+    // agentEventTypeReasoning carries an incremental reasoning chunk (delta).
+    agentEventTypeReasoning = 3;
+    // agentEventTypeAnswer carries an incremental answer chunk (delta).
+    agentEventTypeAnswer = 4;
+    // agentEventTypeDone is the terminal success event (final).
+    agentEventTypeDone = 5;
+    // agentEventTypeFailed is a terminal error event (error).
+    agentEventTypeFailed = 6;
+    // agentEventTypeStopped is a terminal event when the user stopped the run.
+    agentEventTypeStopped = 7;
+    // agentEventTypeInterrupted signals the run paused awaiting approval.
+    agentEventTypeInterrupted = 8;
+    // agentEventTypeUsage carries the run's accumulated token usage so far.
+    agentEventTypeUsage = 9;
+    // agentEventTypeSuspended is the terminal event of a stream that ended
+    // because the run paused for approval. It is distinct from done/failed/
+    // stopped because the run has not finished: a later resume continues it, so
+    // a renderer must not present the work so far as a result.
+    agentEventTypeSuspended = 10;
+    // agentEventTypeImage carries one or more generated image references
+    // (images). It is a *non-terminal* event: a run may produce several images
+    // and go on working, so a renderer shows each one as it arrives rather than
+    // treating this as a result.
+    //
+    // An older client that does not know this value drops the event rather than
+    // misreading it: the translation tables map unknown enum values to "not an
+    // event", which is why this is a new value rather than a new field on an
+    // existing one.
+    agentEventTypeImage = 11;
+    // agentEventTypeSource carries the documents a retrieval returned
+    // (sources). Like agentEventTypeImage it is a *non-terminal* event: a run
+    // may retrieve more than once, so a renderer shows each report as it
+    // arrives rather than treating this as a result.
+    //
+    // It follows the same rule: an older client drops a value it does not know
+    // instead of misreading it, which is why this is a new value rather than a
+    // new field on an existing one.
+    agentEventTypeSource = 12;
+}
+
+// AgentStreamEvent is one event in an agent run stream. It mirrors the
+// backend-neutral agent.Event so the chat can drive a Lark card from the
+// /v1/agent/ask SSE endpoint.
+message AgentStreamEvent {
+    // type is the event kind.
+    AgentEventType type = 1;
+    // delta is the incremental text for reasoning/answer events.
+    string delta = 2;
+    // steps are the tool steps for progress/tool_step events.
+    repeated AgentToolStep steps = 3;
+    // final is the full answer for a done event.
+    string final = 4;
+    // error is the cause for a failed event.
+    string error = 5;
+    // runID identifies the run (used for stop/approve).
+    string runID = 6;
+    // interrupt describes the approval pause for an interrupted event.
+    AgentInterrupt interrupt = 7;
+    // usage reports the run's accumulated token usage. It is set on usage
+    // events and on the terminal done event, where it is the authoritative
+    // total.
+    AgentUsage usage = 8;
+    // images are the generated image references, set on agentEventTypeImage.
+    //
+    // Field 9 rather than a new message, so the event keeps one shape and a
+    // renderer switches on type alone. It is safe to add: a client built
+    // before this field existed ignores it, and proto3 does not require it to
+    // round-trip.
+    repeated ImageRef images = 9;
+    // sources are the documents a retrieval returned, set on
+    // agentEventTypeSource.
+    //
+    // The same shape as images, and added the same way: the event keeps one
+    // shape, a renderer switches on type alone, and a client built before this
+    // field existed ignores it.
+    repeated AgentKnowledgeSource sources = 10;
+}
+
+// AgentKnowledgeSource names one document a retrieval returned, without
+// carrying the passages themselves.
+//
+// # What it deliberately does not carry
+//
+// An address a person can open. documentKey is whatever the corpus calls the
+// document, and this service neither interprets it nor builds a URL from it:
+// only the platform that owns the corpus knows its address space, its
+// permission model, and whether the material is still published. A caller that
+// resolves it does so knowing which corpus it asked.
+message AgentKnowledgeSource {
+    // documentKey is the owning corpus's identifier for the document — a name,
+    // an id, whatever that platform calls it. Opaque here.
+    string document_key = 1;
+    // title is the document's human-readable name, when the platform reports
+    // one. Empty means it does not know one, which is not an error.
+    string title = 2;
+    // url is the platform's own address for the document, when it reports one.
+    // Never built by this service.
+    string url = 3;
+}
+
+// AgentAskRequest starts a streaming agent run.
+//
+// The message is a destructive replacement of the flat request that preceded
+// it: identity, content, selection, model, generation, execution policy and
+// metering are separate groups, so adding one does not widen another.
+//
+// # One message, three surfaces
+//
+// The signed face (/v1/agent/ask) is called by a trusted service with AK/SK,
+// and every field here is covered by that signature. The console faces
+// (/v1/admin/agent/ask and /v1/user/agent/ask) are called from a browser
+// holding a bearer token, so the fields a browser may not control are refused
+// rather than ignored: subject, actor, sessionId, metering, options, metadata,
+// model and selection.invokedSkills. After authentication the server writes
+// those itself. capabilities, composition and sessionNonce are the reverse:
+// console-only run controls that the signed face refuses. The browser
+// boundary lives in one place, internal/agent/pkg/validation/console_ask.go.
+message AgentAskRequest {
+    // Default is hand-written in request_defaults.go: runId is a UUID generated
+    // at bind time.
+    option (defaults.unexported) = true;
+
+    // sessionId identifies the conversation memory bucket.
+    string sessionId = 1;
+    // runId uniquely identifies the run for stop/approve; generated if empty.
+    string runId = 2;
+
+    // input is this turn's content. History stays in the runtime's session.
+    Input input = 3;
+
+    // selection names the agents and the skills the caller invoked explicitly.
+    Selection selection = 4;
+
+    // model names a configured model endpoint (agent.model.name). Empty means
+    // the selected agent's model, then the deployment default. Credentials are
+    // never carried here.
+    string model = 5;
+
+    // generation carries per-run generation parameters.
+    GenerationConfig generation = 6;
+
+    // subject is the party the run executes as: authorization, metering and
+    // attribution all use it. Required.
+    Principal subject = 7;
+    // actor is the party that started the run when it differs from subject.
+    // Audit only; empty means subject.
+    Principal actor = 8;
+
+    // options carries execution policy.
+    ExecutionOptions options = 9;
+
+    // metering says who writes this run's ledger rows.
+    Metering metering = 10;
+
+    // metadata is observability/attribution only. It never changes behaviour.
+    map<string, string> metadata = 11;
+
+    // capabilities, when present, narrows this run to exactly these names.
+    // Absent means the agent's full effective set. A present but empty message
+    // means "narrowed to nothing", which stays distinguishable from absent.
+    //
+    // Console surfaces only: the signed face refuses it.
+    CapabilitySelection capabilities = 12;
+    // composition, when present, replaces the host agent's instruction and
+    // capability bindings for this run instead of narrowing them. With a named
+    // agent, that agent supplies only the execution identity, quota, runtime
+    // profile, memory settings, delegates, webhooks and the approval floor.
+    // With no agent (self-service only), the composition is the whole
+    // configuration: the hostless playground.
+    //
+    // Console surfaces only: the signed face refuses it.
+    AgentComposition composition = 13;
+    // sessionNonce scopes the run's memory bucket when composition is present.
+    // Two debug conversations with the same composition would otherwise share
+    // their server-side history; the console sends a fresh nonce per
+    // conversation and rotates it when the composition changes.
+    //
+    // Required with composition, ignored otherwise. Validated as an opaque
+    // token, never parsed. Console surfaces only: the signed face refuses it.
+    string sessionNonce = 14;
+}
+
+// Input is one turn's content.
+message Input {
+    // text is the cleaned user prompt.
+    string text = 1;
+    // images are multimodal inputs, each an image reference.
+    repeated ImageRef images = 2;
+}
+
+// Selection names the agent set and the caller's explicit skill choices.
+message Selection {
+    // agents is the agent set to run. Empty means no agent set at all (no
+    // instruction, tools or knowledge bases), not "the default agent".
+    repeated string agents = 1;
+    // invokedSkills names skills the asker selected explicitly. Every name
+    // must be declared by one of the selected agents, or the run is refused.
+    repeated string invokedSkills = 2;
+}
+
+// Principal is an identity.
+message Principal {
+    // id is the stable identity (a platform user ID or an open_id).
+    string id = 1;
+    // name is the display name.
+    string name = 2;
+}
+
+// GenerationConfig carries per-run generation parameters.
+message GenerationConfig {
+    // reasoning requests the reasoning stream. Optional so "off" and "unset"
+    // stay distinguishable.
+    optional bool reasoning = 1;
+    optional double temperature = 2;
+    optional int32 maxOutputTokens = 3;
+    optional double topP = 4;
+    // providerOptions carries vendor-specific parameters that the core
+    // generation fields do not model. Reserved request fields may not be
+    // overridden.
+    map<string, string> providerOptions = 5;
+}
+
+// ExecutionOptions carries run policy.
+message ExecutionOptions {
+    Approval approval = 1;
+    // deadline bounds this run; the runtime takes the smaller of it and its
+    // deployment run-timeout.
+    google.protobuf.Duration deadline = 2;
+}
+
+// Approval describes whether a run can pause for a human.
+message Approval {
+    enum Channel {
+        CHANNEL_UNSPECIFIED = 0;
+        // CHANNEL_INTERACTIVE can pause and wait for an answer over SSE.
+        CHANNEL_INTERACTIVE = 1;
+        // CHANNEL_NONE cannot answer; gated tools follow Fallback.
+        CHANNEL_NONE = 2;
+    }
+    enum Fallback {
+        FALLBACK_UNSPECIFIED = 0;
+        FALLBACK_DENY = 1;
+        FALLBACK_ERROR = 2;
+    }
+    Channel channel = 1;
+    Fallback fallback = 2;
+}
+
+// Metering says who writes the ledger rows for a run.
+message Metering {
+    enum Mode {
+        // MODE_UNSPECIFIED keeps the historical behaviour: the runtime reports.
+        MODE_UNSPECIFIED = 0;
+        // MODE_CALLER means the caller writes the ledger itself.
+        MODE_CALLER = 1;
+        // MODE_RUNTIME means the runtime reports through the usage route.
+        MODE_RUNTIME = 2;
+        // MODE_NONE means nobody meters this run (platform-owned work).
+        MODE_NONE = 3;
+    }
+    Mode mode = 1;
+}
+
+// AgentApproveRequest answers a paused agent run and resumes it.
+//
+// The answer is a second run rather than a signal into the first: the pod that
+// paused the run may be gone by the time a human answers, so the continuation is
+// rebuilt from the stored checkpoint and may execute anywhere. Its response is
+// therefore a stream of AgentStreamEvent, exactly like AgentAskRequest's.
+message AgentApproveRequest {
+    // runID identifies the paused run to answer. It is also the checkpoint ID.
+    string runID = 1;
+    // decision is "allow", "deny" or "allow_all", and applies to every
+    // permission request in the pause.
+    string decision = 2;
+    // requestID is the pause being answered, as carried by the interrupt event.
+    // It must match the one the run is waiting on, so an answer to a card the
+    // run has already moved past is refused instead of being applied to a later
+    // pause of the same run.
+    string requestID = 3;
+    // answers supplies the text for question interrupts, keyed by the request's
+    // address. A permission request takes its answer from decision instead, so
+    // an address appears here only when its kind is "question".
+    map<string, string> answers = 4;
+    // reason optionally explains a refusal. It is handed to the model in the
+    // refused tool's result, so the model can say why the call did not run
+    // rather than leaving the asker with a bare no.
+    string reason = 5;
+}
+
+// AgentStopRequest stops an in-flight agent run.
+message AgentStopRequest {
+    // runID identifies the run to stop.
+    string runID = 1;
+}
+
+// AgentStopResponse is the response for a stop action.
+message AgentStopResponse {}
+
+// AgentComposition is the exact set of components one composed run uses.
+//
+// The lists are replacements, not a narrowing: a name may be one the host
+// agent does not declare. Existence, enabled-state, namespace policy and the
+// caller's authorization are checked by the run, exactly as they are for an
+// agent whose bindings these names would be.
+//
+// Empty lists are meaningful: an empty prompts list adds no agent prompt (the
+// runtime's own framework instruction may still apply), and empty capability
+// lists mean no skills, MCP tools, knowledge bases or custom commands.
+message AgentComposition {
+    repeated string prompts = 1;
+    repeated string skills = 2;
+    repeated string mcps = 3;
+    repeated string knowledgeBases = 4;
+    repeated string customCommands = 5;
+    // model names a model endpoint to use instead of the host's or the
+    // deployment default. Empty inherits the host's model when there is a host,
+    // otherwise the deployment default. A hostless composition has no host, so
+    // empty always means the deployment default.
+    string model = 6;
+    // namespace is the referrer namespace of this composed run. Bare entries
+    // resolve against it, and a cross-namespace reference is judged as coming
+    // from an Agent in it. Empty means the deployment default namespace.
+    //
+    // A hostless run uses the console's current business namespace. A hosted
+    // run already has a referrer — the host agent's namespace — so a value
+    // that disagrees with it is refused rather than silently ignored.
+    string namespace = 7;
+}
+
+// CapabilitySelection is the subset of an agent's effective capabilities one
+// debug run should use.
+//
+// The run-relevant kinds only. `commands` (binding-contributed chat commands)
+// is part of the effective view but no debug run consumes it, and the approval
+// patterns are a safety floor rather than a capability: neither belongs in a
+// field whose presence means "run with only these".
+message CapabilitySelection {
+    repeated string skills = 1;
+    repeated string mcps = 2;
+    repeated string knowledgeBases = 3;
+    repeated string customCommands = 4;
+}

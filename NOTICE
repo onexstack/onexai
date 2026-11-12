@@ -1,0 +1,18 @@
+onexai
+Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+
+This product includes software developed at The Kubernetes Authors
+(https://www.kubernetes.io/), licensed under the Apache License 2.0.
+
+This product includes a patched copy of github.com/feizaonet/cobrax in
+third_party/cobrax, licensed under the Apache License 2.0.
+
+This product includes a patched copy of github.com/polarismesh/grpc-go-polaris
+in third_party/grpc-go-polaris, licensed by Tencent (see that directory's
+LICENSE).
+
+Third-party dependencies retain their own licenses; see each module in go.mod
+and the license files shipped with them.
+
+This product includes code derived from github.com/onexstack/onexstack
+(pkg/astore), Copyright Lingfei Kong, licensed under the Apache License 2.0.

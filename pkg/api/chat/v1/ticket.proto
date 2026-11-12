@@ -1,0 +1,72 @@
+// Duty-domain API definition: the on-duty groups and the watchers they carry.
+//
+// There is deliberately no ticket message here. A ticket's one description is
+// the GORM model (internal/chat/model/ticket.go) and its JSON tags, which the
+// duty commands and GET /v1/tickets both speak; a second declaration in proto
+// would be a second thing to keep in step, and the one that used to live here
+// had drifted without any code noticing.
+syntax = "proto3"; // Specifies the syntax version used by this file.
+
+package chat.v1;
+
+option go_package = "github.com/onexstack/onexai/pkg/api/chat/v1;v1";
+
+// AssignStrategy determines how the primary on-call person is selected.
+enum AssignStrategy {
+    // ASSIGN_STRATEGY_UNSPECIFIED is the zero value; treated as ASSIGN_PRIMARY.
+    ASSIGN_STRATEGY_UNSPECIFIED = 0;
+
+    // ASSIGN_PRIMARY always selects the first watcher as primary.
+    ASSIGN_PRIMARY = 1;
+
+    // ASSIGN_PRIMARY_BACKUP selects the first watcher as primary, rest as backup.
+    ASSIGN_PRIMARY_BACKUP = 2;
+
+    // ASSIGN_ROUND_ROBIN rotates the primary by ticket count.
+    ASSIGN_ROUND_ROBIN = 3;
+
+    // ASSIGN_TIME_BASED selects based on working hours.
+    ASSIGN_TIME_BASED = 4;
+}
+
+// Watcher is a single on-call user.
+message Watcher {
+    // user_id is the platform user identifier (Lark user_id).
+    string user_id = 1;
+
+    // user_name is the display name.
+    string user_name = 2;
+
+    // open_id is the Lark open_id, when known.
+    string open_id = 3;
+}
+
+// OnDutyGroup describes a duty group and its hierarchy.
+message OnDutyGroup {
+    // Field 2 used to carry a separate "group code" beside this id. The two
+    // held the same value, so the id is now the only spelling.
+    reserved 2;
+    reserved "group_code";
+
+    // group_id is the group's identifier: its name, lower-cased, which is the
+    // token every duty command takes as an argument.
+    string group_id = 1;
+
+    // group_name is the human-readable name.
+    string group_name = 3;
+
+    // short_desc is a short description for list/card display.
+    string short_desc = 4;
+
+    // long_desc is a detailed description.
+    string long_desc = 5;
+
+    // parent_group_id is the parent group's id, empty for root groups.
+    string parent_group_id = 6;
+
+    // assign_strategy is the on-call assignment strategy.
+    AssignStrategy assign_strategy = 7;
+
+    // children is the list of child groups.
+    repeated OnDutyGroup children = 8;
+}

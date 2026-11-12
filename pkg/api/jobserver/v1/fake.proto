@@ -1,0 +1,18 @@
+// Healthz API definition, which includes health check response messages and status.
+syntax = "proto3"; // Specifies the syntax version used by this file.
+
+package jobserver.v1;
+
+option go_package = "github.com/onexstack/onexai/pkg/api/jobserver/v1;v1";
+
+// FakeData represents a mock entity with diverse fields for testing.
+message FakeData {
+    string ID = 1;
+    string name = 2;
+    string category = 3;
+    string description = 4;
+    string status = 5;
+  
+    // Maps to float64 in Go
+    double score = 7;
+}

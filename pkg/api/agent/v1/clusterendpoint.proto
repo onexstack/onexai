@@ -1,0 +1,63 @@
+// Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// This file defines the Protobuf messages for managing ClusterEndpoints.
+//
+syntax = "proto3"; // Specifies the syntax version used in this file.
+
+package agent.v1;
+
+option go_package = "github.com/onexstack/onexai/pkg/api/agent/v1;v1";
+
+// ClusterEndpoint is one k8sgpt/MCP endpoint a cluster exposes.
+message ClusterEndpoint {
+    string name = 1;
+    string namespace = 2;
+    string displayName = 3;
+    string description = 4;
+    string status = 5;
+    string clusterName = 6;
+    string accountId = 7;
+    string protocol = 8;
+    string endpoint = 9;
+    bool primaryMCP = 10;
+    map<string, string> labels = 11;
+    int64 createdAt = 12;
+    int64 updatedAt = 13;
+    // conditions is the status.conditions array encoded as JSON. It keeps the
+    // protobuf surface small while preserving the Kubernetes condition shape.
+    string conditions = 14;
+    int64 lastProbeTime = 15;
+    int32 latencyMillis = 16;
+    string message = 17;
+}
+
+message CreateClusterEndpointRequest { ClusterEndpoint clusterEndpoint = 1; }
+message CreateClusterEndpointResponse { ClusterEndpoint clusterEndpoint = 1; }
+message UpdateClusterEndpointRequest { ClusterEndpoint clusterEndpoint = 1; }
+message UpdateClusterEndpointResponse { ClusterEndpoint clusterEndpoint = 1; }
+message DeleteClusterEndpointRequest { string name = 1; }
+message DeleteClusterEndpointResponse {}
+message GetClusterEndpointRequest { string name = 1; }
+message GetClusterEndpointResponse { ClusterEndpoint clusterEndpoint = 1; }
+message ListClusterEndpointRequest {
+    // @gotags: form:"offset"
+    int32 offset = 1;
+    // @gotags: form:"limit"
+    int32 limit = 2;
+}
+message ListClusterEndpointResponse {
+    repeated ClusterEndpoint clusterEndpoints = 1;
+    int64 count = 2;
+}

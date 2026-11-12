@@ -1,0 +1,290 @@
+insecure:
+  addr: ":9180"
+
+coredb:
+  dialect: postgres
+  addr: {{ .Values.config.coredbAddr }}
+  username: onexai
+  password: "{{ .Values.config.coredbPassword }}"
+  database: onexai
+  sslmode: disable
+  log-level: 0
+
+# Authentication and authorization — mirrors Kubernetes --anonymous-auth / --authorization-mode
+auth:
+  anonymous-auth: false
+  # Empty means "validate the token normally". AlwaysDeny is not the stricter
+  # version of that: it refuses every request, a valid token included, which is
+  # why every JWT-gated route answered 403 no matter what login returned.
+  authorization-mode: ""
+
+jwt:
+  # Must not be the built-in placeholder; the server refuses to start otherwise.
+  #
+  # This key must be the same value as oai-agent-apiserver.yaml's: this service
+  # mints the token and that one validates it on /v1/admin. Changing it here
+  # alone breaks the management surface, not the login.
+  key: "{{ .Values.config.jwtKey }}"
+  # The option is `expired` (it binds onexstack's JWTOptions.Expired); the
+  # `expiry` spelling this file used to carry was silently ignored.
+  expired: "24h"
+im-backend: lark
+
+lark:
+  #url: "https://open.larksuite.com"
+  app-id: "{{ .Values.config.larkAppId }}"
+  app-secret: {{ .Values.config.larkAppSecret }}
+  url: "https://open.feishu.cn"
+  event-mode: "websocket"   # websocket | webhook
+  verification-token: ""
+  bot-name: "OneX"
+
+bot-name: "OneX"
+
+# oai-agent-apiserver client for AI commands (/askai, /clear, /agent, /aiassets).
+agent:
+  endpoint: "{{ .Values.config.agentEndpoint }}"
+  timeout: "3m"
+  retry-count: 2
+
+# AK/SK this server signs its oai-agent-apiserver requests with. oai-agent-apiserver
+# authenticates every /v1 call, so api-key must match a secret_id row in its
+# oai_ai_secret table, and secret-key must match that row's secret_key.
+agent-aksk:
+  api-key: "oai-chat-apiserver"
+  secret-key: "{{ .Values.config.agentAkskSecretKey }}"
+
+openim:
+  api-addr: "http://localhost:10002"
+  ws-addr:  "ws://localhost:10001"
+  admin-user-id: "imAdmin"
+  secret: "{{ .Values.config.openimSecret }}"
+
+database:
+  dsn: ""
+
+# LLM backend for /askai — leave base_url empty to disable
+llm:
+  base-url: "https://opencode.ai/zen/v1"                   # e.g. https://api.openai.com/v1
+  api-key:  "{{ .Values.config.llmApiKey }}"                   # your OpenAI / compatible API key
+  #model:    "gpt-4o-mini"        # model name
+  model:    "mimo-v2.5-free"        # model name
+
+log:
+  level: "info"
+  format: "json"
+
+fake:
+  endpoint: http://127.0.0.1
+oss:
+  endpoint: http://127.0.0.1
+otel:
+  endpoint: 127.0.0.1:4327
+  service-name: oai-chat-apiserver
+  output-mode: classic
+  level: debug
+  add-source: true
+  use-prometheus-endpoint: true
+  slog: # 只有 --otel.user-native-slog 为 true 时配置才生效
+    format: text # 只有output-mod为slog时生效
+    time-format: "2006-01-02 15:04:05" # 只有output-mod为slog时生效
+    output: stdout # 只有output-mod为slog时生效
+
+# Session lifecycle, streaming and agent-backend tuning.
+# Every value below is the built-in default, so this block documents the knobs
+# more than it configures them: deleting it changes nothing.
+chat:
+  # OIDC-compatible token issuance. Off by default; when enabled it publishes
+  # /.well-known/openid-configuration and /keys for a Kubernetes authenticator.
+  oidc:
+    enabled: false
+    issuer-url: ""
+    audiences: []
+    key-file: ""
+    key-id: ""
+    token-ttl: "1h"
+
+  # ── 服务间凭据 ────────────────────────────────────────────────────────────
+  #
+  # 写对端绑定（/v1/peer-agents、/v1/peer-bind-claims）的调用方凭据。**为什么是
+  # 一条列表而不是一个共享密钥**：绑定回答的是"这个聊天身份是哪个业务账号"，写者
+  # 必须可归因，那个答案才有意义——chat.peer_agent.source 记的就是哪条凭据写的这一
+  # 行，而单一共享密钥会让每一行都写着同一句话。撤销一个集成方也不会连带撤销别人。
+  #
+  # 空列表等于把这些端点整个关掉（中间件拒绝），这是没有集成方的部署该有的状态。
+  #
+  # ⚠️ 必须在 `chat:` 下。它一度被写在 `lark:` 下（两个块挨着，看着都对），而 viper
+  # **对未知键静默丢弃**——症状不是启动报错，是绑定链路的每一次调用都被中间件拒掉，
+  # 而配置看起来一切正常。键名以 pkg/options/chat_options.go 的 mapstructure 为准。
+  internal-credentials:
+    - secret: "{{ .Values.config.chatIamCredential }}"
+      subject: "onex-iam"
+    # ox-jobserver：读 OnCall 工单与工单群聊天记录，把它们同步成 OneX 平台上的社区问答。
+    # 单独一条而不是复用 onex-iam：撤销一个集成方不该连带撤销另一个（见 peer.go 的注释），
+    # 而且 oncall 那条路由的读取范围比绑定投影宽得多。
+    - secret: "{{ .Values.config.chatJobserverCredential }}"
+      subject: "ox-jobserver"
+
+  # ── 会话的默认 agent ──────────────────────────────────────────────────────
+  #
+  # `@default` 这个引用按**发言者**是否属于本租户取其中之一（见
+  # internal/chat/biz/v1/bot/schedule.go）：租户内取 internal-default，租户外
+  # （未绑定/非会员）取 external-default。
+  #
+  #   internal-default: fz-public  —— 租户内未绑定成员：通用助手（无 MCP）
+  #   external-default: fz-visitor —— 外部访客：零能力，无知识库/Skill/MCP
+  # 两个都不是 fz-default（那带 zke-kubeagent / zadig-mcp 运维工具链，只能显式点名）。
+  # external-default 的**代码默认是空的**，所以这一行是本机把这个能力打开的地方；
+  # 种子见 onexai/hack/fz-visitor-seed.sql（没跑种子则外部发言者拿到"没有可用 agent"卡片）。
+  internal-default: fz-public
+  external-default: fz-visitor
+
+  # /v1/auth/login 的 local provider 关闭：三种 provider 都无法真正校验凭据
+  # （chat 侧没有口令存储），打开它等于接受「任意非空用户名/口令都能换到签名
+  # 令牌」。2026-10-21 起本机配置也关掉，需要临时联调时改回 true 会打 INSECURE
+  # 告警。
+  login:
+    allow-local: false
+  # ── agent 命令授权（chat.agent_command）的快照寿命 ────────────────────────
+  #
+  # 谁拿到哪些斜杠命令，由 chat.agent_command 的表行决定（不是 YAML）。哪些行
+  # 盖到哪个 agent、以及一个 agent 的标签/skill 列表，都在 resolver 里做成快照
+  # 复用——每个消息都要解析一次命令树，热路径上不能再读库。这三条就是快照的寿命：
+  # 一条改动在**没处理这次写请求的副本**上最多多久看不见。
+  #
+  # rules-ttl 自 2026-10-12 起由 15s 收成 5s：15s 长到"改完规则盯着看它不生效"。
+  # 三个默认值都取自 internal/chat/pkg/agentcmd 的同名常量，这里写出来是文档。
+  agent-command:
+    rules-ttl: 5s
+    # 一个 agent 的标签（tags / namespace）多久算过期。
+    agents-ttl: 60s
+    # 一个 agent 的 skill 命令列表多久算过期；枚举它最贵，所以活得最久。
+    skills-ttl: 2m
+    # 自定义命令列表的缓存时长。
+    customs-ttl: 15s
+  session:
+    idle-timeout: 15m
+    event-idle-timeout: 2h
+    close-timeout: 150s
+    busy-stale-lock-max-held: 2m
+    max-queued-messages: 5
+    max-concurrent-turns: 3
+    turn-timeout: 5m
+  streaming:
+    enabled: true
+    interval: 1500ms
+    min-delta-chars: 30
+    max-chars: 2000
+    print-frequency-ms: 50
+    print-step: 2
+    print-strategy: fast
+  progress:
+    style: card
+    max-entries: 10
+    interval: 250ms
+  dedup:
+    enabled: true
+    ttl-sec: 300
+    max-entries: 4096
+  # 飞书账号绑定：用户把控制台的绑定码作为 /bind-onex <code> 发给机器人，这里决定那条
+  # claim 在 chat.peer_bind_claim 里活多久，供 iam 轮询读取。
+  #
+  # ⚠️ 必须 **严格大于** iam 的 feishu.code-ttl（本机 ~/.onex/ox-iam-apiserver.yaml
+  # 里是 10m）。claim 先过期不会报错：iam 读到 nil，把用户明明说出口的绑定报成
+  # expired，两边日志都没有异常。15m = 10m + 5m 余量。
+  peer-bind:
+    claim-ttl: 15m
+  agents:
+    default-backend: llm
+    cli:
+      # The CLI backend runs a local process on behalf of whoever can reach the
+      # conversation. Leave it off until workspace-root and an auth policy are
+      # in place: the server refuses to start with this enabled while
+      # auth is anonymous or authorization-mode is AlwaysAllow.
+      enabled: false
+      max-sessions: 4
+      permission-mode: stdio
+      max-line-bytes: 8388608
+
+# Auxiliary HTTP backends. Zadig backs the /pipeline ChatOps command, which
+# triggers a release workflow (POST /openapi/workflows/product/task).
+  # Dissolving closed ticket groups.
+  #
+  # The bot already promises this when a ticket closes — "本群将在 1 天后自动解散" —
+  # and until this sweep existed nothing did it. Off by default because the call
+  # cannot be undone and Lark keeps no history for a group it dissolved: the
+  # messages are gone from the platform the moment it returns. The sweep
+  # archives them first, and refuses to dissolve a group whose archive failed,
+  # but a deployment should still turn this on having decided that its closed
+  # groups should go.
+  dissolve:
+    enabled: false              # true: closed, unsaved groups are dissolved after the grace period
+    grace-after-close: "24h"    # how long after /close a group is left alone
+    interval: "1m"              # how often a pass runs
+    batch: 50                   # groups handled per pass
+    history-limit: 500          # messages archived per group
+  # Policy-backed role resolution.
+  #
+  # Off: the SRE/admin questions are answered from the chat.setting lists, which
+  # is what every deployment did before this switch existed. On: they are
+  # answered by AuthorizationRule objects (resource_kind "role"), with
+  # the lists demoted to "who is in which group" — a rule may name a person or a
+  # group, and a group deny wins over a person grant. Turning this on without
+  # writing rules refuses every role, so seed the rules first.
+  role-authz:
+    enabled: false
+    rule-table-refresh-interval: "60s"
+backend:
+  # Base URL of the Zadig instance, without the /openapi suffix,
+  # e.g. https://zadig.example.com
+  zadig-endpoint: "http://127.0.0.1:30094"
+  # Account-level API token (Zadig: 账号设置 -> API Token). A secret: prefer the
+  # OAI_CHAT_APISERVER_BACKEND_ZADIG_TOKEN environment variable over this key, and
+  # never pass it as --backend.zadig-token, which is visible in `ps`.
+  zadig-token: "{{ .Values.config.zadigToken }}"
+  # Default for the command's --project flag; required by the command when unset.
+  zadig-project: "onex"
+  # Prometheus HTTP API (anonymous) that backs the /pod ChatOps command.
+  # Leave empty to disable metric queries; /pod then reports 未配置指标地址.
+  prometheus-endpoint: "http://lgtm.example.com:9090"
+  # CMDB enrichment for the resource commands is kept in the code but disabled
+  # until CMDB is ready; set to true to turn it back on.
+  cmdb-enabled: false
+  # Regen on-call platform (observability). Backs the duty commands (/oncall,
+  # /duty, /close, /open, /save) and mirrors every oai_ticket as a Regen
+  # incident. Regen has no API key: the client logs in with this account and
+  # keeps the session cookie. Leave regen-endpoint empty to keep the duty
+  # store empty and tickets local-only.
+  regen-endpoint: http://regen.example.com:8080
+  regen-username: oai-chat-apiserver@example.com
+  regen-password: {{ .Values.config.regenPassword }}
+  # Regen on-call name (an email) -> Lark user_id, comma-separated. Regen
+  # participants are free text; without an entry here the raw name is sent to
+  # Lark and the ticket group cannot be created.
+  regen-user-map: "go.kong@example.com=go.kong,toka.wu@example.com=toka.wu,ops.luo@example.com=ops.luo"
+duty:
+  provider: regen
+
+mcp:
+  enabled: true
+  addr: "0.0.0.0:8091"
+  name: "oai-chat-apiserver"
+  version: "1.0.0"
+  # Re-read the custom-command catalog (and rebuild tools) at this interval.
+  refresh-interval: "10s"
+
+
+controlplane:
+  kubeconfig: "/etc/onexai/controlplane/kubeconfig"
+  namespace: ""
+  sync-timeout: 30s
+  resync-period: 60s
+
+store:
+  read-backend: controlplane
+  read-backends: {}
+  mirror:
+    schema: mirror
+    max-lag: "10m"
+    count-mode: exact
+  get-cache-size: 10000

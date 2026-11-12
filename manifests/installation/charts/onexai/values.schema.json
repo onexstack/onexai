@@ -1,0 +1,167 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "onexai chart values",
+  "type": "object",
+  "required": ["global", "services"],
+  "properties": {
+    "global": {
+      "type": "object",
+      "required": ["image", "secrets"],
+      "properties": {
+        "image": {
+          "type": "object",
+          "required": ["registry", "tag"],
+          "properties": {
+            "registry": { "type": "string", "minLength": 1 },
+            "tag": { "type": "string", "minLength": 1 },
+            "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+          }
+        },
+        "imagePullSecrets": { "type": "array" },
+        "replicas": { "type": "integer", "minimum": 0 },
+        "secrets": {
+          "type": "object",
+          "required": ["name"],
+          "properties": { "name": { "type": "string", "minLength": 1 } }
+        },
+        "resources": { "type": "object" },
+        "scheduling": { "type": "object" },
+        "containerSecurityContext": { "type": "object" },
+        "podAnnotations": { "type": "object" }
+      }
+    },
+    "services": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "object",
+            "required": ["enabled", "kind", "ports", "service"],
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "kind": { "enum": ["apiserver", "mcp"] },
+          "replicas": { "type": "integer", "minimum": 0 },
+          "mcpToken": { "type": "boolean" },
+          "config": { "type": "object" },
+          "ports": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["name", "containerPort"],
+              "properties": {
+                "name": { "type": "string", "maxLength": 15 },
+                "containerPort": { "type": "integer", "minimum": 1, "maximum": 65535 }
+              }
+            }
+          },
+          "service": {
+            "type": "object",
+            "required": ["type", "ports"],
+            "properties": {
+              "type": { "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
+              "ports": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["name", "port", "targetPort"],
+                  "properties": {
+                    "name": { "type": "string", "maxLength": 15 },
+                    "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+                    "targetPort": {
+                      "oneOf": [
+                        { "type": "integer", "minimum": 1, "maximum": 65535 },
+                        { "type": "string" }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "probes": { "type": "object" },
+          "resources": { "type": "object" },
+          "scheduling": { "type": "object" },
+          "extraEnv": { "type": "array" },
+          "controlPlane": { "type": "boolean" }
+        }
+          },
+          {
+            "comment": "仅镜像覆盖：k8s-update.sh 用 --set services.<名>.image.tag 给不在 services 循环里的工作负载（控制面）指定 tag。它没有 enabled/kind/ports/service，因此不会被 onexai.serviceNames 渲染成 Deployment。",
+            "type": "object",
+            "required": ["image"],
+            "properties": {
+              "image": { "type": "object" }
+            }
+          },
+          {
+            "comment": "Worker：没有 Service，只有健康/指标端口（oai-job-controller）。",
+            "type": "object",
+            "required": ["enabled", "kind", "ports"],
+            "properties": {
+              "enabled": { "type": "boolean" },
+              "kind": { "enum": ["worker"] },
+              "replicas": { "type": "integer", "minimum": 0 },
+              "ports": { "type": "array", "minItems": 1 },
+              "config": { "type": "object" },
+              "resources": { "type": "object" },
+              "probes": { "type": "object" },
+              "image": { "type": "object" },
+              "scheduling": { "type": "object" },
+              "controlPlane": { "type": "boolean" },
+              "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 }
+            }
+          }
+        ]
+      }
+    },
+    "controlplane": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "etcd": {
+          "type": "object",
+          "required": ["servers", "prefix"],
+          "properties": {
+            "servers": { "type": "string", "minLength": 1 },
+            "prefix": { "type": "string", "pattern": "^/onexai\\.io" },
+            "compactionInterval": { "type": "string" },
+            "countMetricPollPeriod": { "type": "string" },
+            "dbMetricPollInterval": { "type": "string" }
+          }
+        },
+        "declserver": {
+          "type": "object",
+          "properties": {
+            "replicas": { "type": "integer", "minimum": 0 },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "image": { "type": "object" },
+            "resources": { "type": "object" }
+          }
+        },
+        "controllerManager": {
+          "type": "object",
+          "properties": {
+            "replicas": { "type": "integer", "minimum": 0 },
+            "image": { "type": "object" },
+            "resources": { "type": "object" }
+          }
+        },
+        "networkPolicy": {
+          "type": "object",
+          "properties": { "enabled": { "type": "boolean" } }
+        },
+        "secrets": { "type": "object" }
+      }
+    },
+    "tests": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "image": { "type": "string" }
+      }
+    }
+  }
+}

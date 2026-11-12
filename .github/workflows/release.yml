@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build multi-arch binaries
+        run: make build.multiarch
+
+      - name: Package artifacts
+        run: |
+          mkdir -p dist
+          for platform in _output/platforms/*/*; do
+            os=$(basename "$(dirname "$platform")")
+            arch=$(basename "$platform")
+            tar -C "$platform" -czf "dist/onexai-${GITHUB_REF_NAME}-${os}-${arch}.tar.gz" .
+          done
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

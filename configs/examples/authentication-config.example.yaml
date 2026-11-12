@@ -1,0 +1,43 @@
+# Kubernetes structured authentication configuration.
+#
+# Point oai-agent-apiserver's auth.authentication-config at a copy of this file.
+# The OIDC issuer must be reachable over HTTPS; an issuer declared with http://
+# is rejected by the upstream validation, which is what keeps an unencrypted
+# credential exchange out of a production deployment.
+#
+# The platform publishes a matching issuer from oai-chat-apiserver when
+# chat.oidc.enabled is true:
+#   GET {issuer}/.well-known/openid-configuration
+#   GET {issuer}/keys
+apiVersion: apiserver.config.k8s.io/v1
+kind: AuthenticationConfiguration
+jwt:
+  - issuer:
+      url: https://auth.example.com
+      audiences:
+        - onexai
+      # PEM for the CA that signed the issuer's TLS certificate. Omit when the
+      # issuer uses a publicly trusted certificate.
+      certificateAuthority: |
+        -----BEGIN CERTIFICATE-----
+        ...
+        -----END CERTIFICATE-----
+    claimMappings:
+      # sub is the platform account id. Use preferred_username instead if a
+      # human-readable username is what downstream rules should match.
+      username:
+        claim: sub
+        prefix: ""
+      uid:
+        claim: sub
+      groups:
+        claim: groups
+        prefix: ""
+      extra:
+        - key: onexai.io/name
+          valueExpression: claims.preferred_username
+        - key: onexai.io/provider
+          valueExpression: claims["onexai.io/provider"]
+    claimValidationRules: []
+anonymous:
+  enabled: false

@@ -1,0 +1,258 @@
+# =============================================================================
+# OneXAI Chart 的 values。
+#
+# 结构约定（与 onex chart 一致，便于两处互相参照）：
+#   * `global`         —— 环境级默认（镜像、资源、调度、安全上下文、Secret 名）。
+#   * `services.<名>`  —— 逐服务覆盖同名键。
+#   * 某服务的“有效值” = mergeOverwrite(deepCopy global, services.<名>)；files/<名>.yaml
+#     里的占位符就是在这个合并结果上求值的，所以占位符写成 `{{ .Values.config.<键> }}`
+#     这种**不带服务名**的形式。
+#
+# ⚠️ `services.<名>.config` 里凡是机密（口令/key/token）的值在本文件里**一律留空**，
+#    真正的值由 `manifests/installation/sync-configs.rb` 从 ~/.onexai 生成到
+#    **仓外**的 ~/.onexai/values-secrets.yaml，部署时用 -f 带上：
+#      helm upgrade --install onexai manifests/installation/charts/onexai -n onexai-system \
+#        -f ~/.onexai/values-secrets.yaml --set global.image.tag=<tag>
+#    漏带 -f 的后果是服务起不来（空口令握手失败），不是静默降级。
+# =============================================================================
+
+global:
+  image:
+    registry: ghcr.io/onexstack
+    # ⚠️ 占位 tag。部署必须 --set global.image.tag=<构建出的 tag>。
+    tag: v0.0.0
+    pullPolicy: IfNotPresent
+
+  # onexai-system 里实际存在的是 `ccr-credential`（dockerconfigjson）。
+  # 注意：仓库里那份退役的 manifests/onexai/deployment.yaml 写的是
+  # `default-registry-secret` —— 那个名字在本命名空间**不存在**，照抄会 ImagePullBackOff。
+  imagePullSecrets:
+    - name: ccr-credential
+
+  replicas: 1
+
+  # 只引用、不创建。目前只有 onexai(MCP) 用它取 ONEXAI_MCP_TOKEN。
+  # 创建脚本见 manifests/onexai/create-secret.sh（**名字是单数** onexai-secret）。
+  secrets:
+    name: onexai-secret
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # 与 onex 那套同一口径：优先带 governance=prod 的四台 fz-prod-*（有实际内存
+  # 余量），而不是唯一控制面 k8s-01（gitlab/lgtm 已把它推到 ~86%）。preferred
+  # 而非 required：四台放不下时仍可溢出，不会 Pending。
+  scheduling:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+              - key: governance.onexstack.io/env
+                operator: In
+                values:
+                  - prod
+    tolerations:
+      - key: node-role.kubernetes.io/master
+        operator: Exists
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+      - key: CriticalAddonsOnly
+        operator: Exists
+
+  # 镜像以 UID 65532 运行且 rootfs 只读；可写的地方只有 /data、/tmp 两个 emptyDir。
+  containerSecurityContext:
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+
+  podAnnotations: {}
+
+# -----------------------------------------------------------------------------
+# 声明式控制面（oai-declserver + oai-controller-manager）。
+#
+# 运行时把 agents / prompts / skills / knowledgebases / models / mcps / webhooks /
+# authorization-rules / peer-bindings 的读写整体搬到了这里，**没有 SQL 兜底**：
+# 控制面起不来，oai-agent-apiserver 与 oai-chat-apiserver 都起不来（chat 直接
+# return error；agent 会因为 authz 没有规则源而拒绝启动）。
+#
+# 值班组（DutyGroup）不再属于这一段：它已改为 oai-chat-apiserver + PostgreSQL
+# 自有的命令式资源。declserver 通过 --runtime-config 停用 dutygroups，controller-
+# manager 通过 --controllers=-dutygroup 停用对应控制器；etcd 中的旧对象保留以便回滚。
+#
+# 数据落在**集群 etcd** 上，靠 etcd.prefix 与 kube-apiserver 的 /registry 隔离。
+# 证书与 token 不进 git：由 manifests/installation/controlplane-certs.sh 生成到
+# ~/.onexai/controlplane-values.yaml，部署时 -f 带上。
+#
+# 默认关闭。关闭时本段不渲染任何对象，chart 与在此之前完全一致。
+# -----------------------------------------------------------------------------
+controlplane:
+  enabled: false
+
+  etcd:
+    # 与 kube-apiserver 同一套 etcd（k8s-01/02/03 的 2379，双向 TLS）。
+    servers: "https://127.0.0.1:2379,https://127.0.0.1:2379,https://127.0.0.1:2379"
+    # ⚠️ 本部署独占的键空间，必须落在 /onexai.io 之下。
+    # 模板里有守卫：落在 /registry 之下、或不在 /onexai.io 之下，渲染直接失败。
+    # 两个部署共用同一个 prefix 会互相覆盖（.onexai.yaml 的同一条纪律）。
+    prefix: /onexai.io
+    # 共享 etcd 上这三项必须关掉，理由见 templates/declserver.yaml。
+    compactionInterval: "0s"
+    countMetricPollPeriod: "0s"
+    dbMetricPollInterval: "0s"
+
+  # 镜像 tag 不在这里：与其余服务同一个来源（services.<名>.image.tag →
+  # global.image.tag），由 k8s-update.sh 的 --set 指定。见 templates/declserver.yaml。
+  declserver:
+    replicas: 1
+    port: 6444
+    resources:
+      requests: { cpu: 200m, memory: 256Mi }
+      limits: { cpu: 1000m, memory: 1Gi }
+
+  controllerManager:
+    replicas: 1
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: 500m, memory: 512Mi }
+    # 与 oai-agent-apiserver 的 model.api-key-encryption-key 相同。控制面用
+    # 用户模型做提示词聚合时，用它解开 Secret 里的 enc:v1: 值；留空意味着只能
+    # 使用历史明文凭据（用户模型会报 CredentialEncrypted）。
+    modelKeyEncryptionKey: ""
+
+  # 出向收敛：declserver 持有的 etcd 证书等于整库读写权，本该把它能连的地方收窄到
+  # etcd 三个端点 + 集群 DNS。
+  #
+  # **默认关闭**，因为 2026-10-27 首次上线时它把 etcd 也拦掉了：策略里放行了
+  # 127.0.0.1/11/13:2379 与 kube-dns，declserver 仍然报
+  # `etcd grpc connection not ready: context deadline exceeded`；去掉这条策略、
+  # 其它不变，同一个 Pod 立刻连上并把缓存同步完。同一个节点上的 console Pod
+  # （没有策略选中）能打通 etcd，所以问题在这条 egress 策略的匹配上，不在网络。
+  # 具体是 Cilium 对「Pod → 节点 IP」这段的哪一步不一致，还没定位到；在搞清楚之前
+  # 打开它等于让控制面起不来，所以留 false，并在这里写明原因，而不是留一条注释说
+  # 「排查时临时关」——那会让下一个人以为线上是开着的。
+  networkPolicy:
+    enabled: false
+
+  # 机密。**不在本文件里给值**，由 -f ~/.onexai/controlplane-values.yaml 覆盖：
+  #   secrets:
+  #     etcd:   { ca, cert, key }      # 连 etcd 的客户端证书
+  #     tls:    { ca, crt, key }       # declserver 的服务端证书与签发它的 CA
+  #     runtimeToken / controllerToken
+  secrets: {}
+
+# -----------------------------------------------------------------------------
+# 服务。模板里不出现任何 oai-* 字面量——差异只由数据表达：
+#   kind     apiserver | mcp           —— 决定启动命令与默认探针
+#   ports / service.ports              —— 容器端口与服务端口（80/443 都指明文业务端口）
+#   config                             —— files/<名>.yaml 里占位符的取值
+#   probes                             —— 存在时整套覆盖默认探针
+# -----------------------------------------------------------------------------
+services:
+
+  oai-agent-apiserver:
+    enabled: true
+    kind: apiserver
+    # 这份配置里的 controlplane.kubeconfig 指向声明式控制面；Pod 需要挂载它。
+    controlPlane: true
+    # session / stop / checkpoint 都在 Redis，可跨 Pod；LLM 调用本身是 I/O。
+    replicas: 2
+    resources:
+      requests: { cpu: 200m, memory: 256Mi }
+      limits: { cpu: 500m, memory: 512Mi }
+    ports:
+      - { name: http, containerPort: 9181 }
+    service:
+      type: ClusterIP
+      ports:
+        - { name: http, port: 80, targetPort: http }
+        - { name: https, port: 443, targetPort: http }
+    config:
+      # 非机密、随环境变化的项。机密项在本文件里留空，见顶部说明。
+      coredbAddr: 127.0.0.1:5432
+      # 用量上报回 OneX 的 ox-agent-apiserver 控制面。地址与 onex 侧的 Service 端口
+      # 口径一致（80）。
+      usageReportEndpoint: ""
+      coredbPassword: ""
+      redisPassword: ""
+      jwtKey: ""
+      larkAppId: ""
+      larkAppSecret: ""
+      llmApiKey: ""
+      ragflowApiKey: ""
+      usageReportToken: ""
+      modelKeyEncryptionKey: ""
+      mediaSecretId: ""
+      mediaSecretKey: ""
+
+  oai-chat-apiserver:
+    enabled: true
+    kind: apiserver
+    # 命令授权（AgentBinding）、duty group、peer binding 都来自声明式控制面。
+    controlPlane: true
+    # 必须单副本：WS hub、Lark WebSocket、事件去重、会话锁与磁盘 snapshot 都是
+    # 进程内状态；滚动策略由模板切成 Recreate。
+    replicas: 1
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: 500m, memory: 512Mi }
+    ports:
+      - { name: http, containerPort: 9180 }
+      # 同一个进程还开着一个 MCP server（mcp.addr）。它对任何路径都答 200 且
+      # Content-Type 是 text/event-stream——指错端口不会报错，只会永远读到空。
+      - { name: mcp, containerPort: 8091 }
+    service:
+      type: ClusterIP
+      ports:
+        - { name: http, port: 80, targetPort: http }
+        - { name: https, port: 443, targetPort: http }
+        - { name: mcp, port: 8091, targetPort: mcp }
+    config:
+      coredbAddr: 127.0.0.1:5432
+      # 指向同命名空间里的 oai-agent-apiserver。
+      agentEndpoint: http://oai-agent-apiserver:80
+      coredbPassword: ""
+      jwtKey: ""
+      larkAppId: ""
+      larkAppSecret: ""
+      llmApiKey: ""
+      agentAkskSecretKey: ""
+      openimSecret: ""
+      # 两条内部凭据的 secret 值**不能**用环境变量注入（它们在列表里），
+      # 这正是本 chart 把配置渲染成 Secret 而不是 ConfigMap 的原因。
+      chatIamCredential: ""
+      chatJobserverCredential: ""
+      zadigToken: ""
+      regenPassword: ""
+
+  oai-job-controller:
+    # batch.onex.io Job/CronJob 控制器；ScheduledRun 迁移后由它负责到点创建
+    # Job 并驱动 agentrun provider。它没有业务端口，因此没有 Service。
+    enabled: false
+    kind: worker
+    # 控制器靠 manager 级 leader election 保证单活跃；多副本只在切换窗口重叠。
+    replicas: 1
+    # 读取 batch.onex.io（以及迁移期的 ScheduledRun）需要控制面 kubeconfig。
+    controlPlane: true
+    # 在途 agent run 的取消与 finalizer 需要一点时间；30s 往往不够。
+    terminationGracePeriodSeconds: 60
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits: { cpu: 500m, memory: 512Mi }
+    ports:
+      # controller-runtime health probe；chart 默认探针用 "http" 上的 /healthz。
+      - { name: http, containerPort: 8081 }
+      - { name: metrics, containerPort: 8080 }
+    config:
+      # 指向同命名空间里的 oai-agent-apiserver。
+      agentEndpoint: "http://oai-agent-apiserver:80"
+      # 签名身份；secret-key 必须与 agent 侧 secrets 表中的一条记录一致。
+      agentAkskApiKey: "oai-job-controller"
+      agentAkskSecretKey: ""

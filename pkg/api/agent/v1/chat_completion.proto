@@ -1,0 +1,142 @@
+// Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// This file defines the OpenAI-compatible chat completion messages.
+//
+syntax = "proto3"; // Specifies the syntax version used in this file.
+
+package agent.v1;
+
+// ImageRef is the structured form of an attached image.
+import "agent/v1/asset.proto";
+import "github.com/onexstack/defaults/defaults.proto";
+
+// Specifies the Go package for generated code.
+option go_package = "github.com/onexstack/onexai/pkg/api/agent/v1;v1";
+
+// ChatCompletionMessage is a single chat message (role + content).
+message ChatCompletionMessage {
+    // role is the message role: system | user | assistant.
+    string role = 1;
+    // content is the message text.
+    string content = 2;
+    // images are multimodal image inputs attached to this message, each an
+    // image reference in its compact string form: "asset:<id>", "media:<key>",
+    // an http(s) URL, or a legacy base64 data URL. Empty means the message is
+    // text-only (content is used verbatim).
+    repeated string images = 3;
+    // imageRefs carries the same images in the structured form, which adds the
+    // media type and dimensions. It is merged after images.
+    repeated ImageRef imageRefs = 4;
+}
+
+// ChatCompletionRequest is the OpenAI-compatible /v1/chat/completions request.
+message ChatCompletionRequest {
+    // Default is hand-written in request_defaults.go: sessionID is generated at
+    // bind time, which a static annotation cannot express.
+    option (defaults.unexported) = true;
+
+    // sessionID is the conversation thread identifier.
+    string sessionID = 1;
+    // agent is the agent to run, and it is required: an empty value is a
+    // validation error (400), never a fallback. The reserved value "default"
+    // (NoAgent in Go) names no agent and runs the engine's builtin assistant —
+    // no instruction, no MCP servers, no skills, no knowledge bases.
+    string agent = 2;
+    // model is a model endpoint name, i.e. a row of the model table. It is
+    // optional and never selects an agent: when it exists and is usable it wins
+    // over the agent's own model; when it names nothing, the run falls back to
+    // the agent's model and then to the deployment default.
+    string model = 3;
+    // messages is the conversation history.
+    repeated ChatCompletionMessage messages = 4;
+    // temperature controls randomness.
+    double temperature = 5;
+    // maxTokens bounds the completion length.
+    int32 maxTokens = 6;
+    // topP is nucleus sampling.
+    double topP = 7;
+    // stream enables SSE streaming.
+    bool stream = 8;
+    // stop sequences.
+    repeated string stops = 9;
+    // senderID is the submitter/operator identity (user_id / email / open_id).
+    string senderID = 10;
+}
+
+// ChatCompletionChoice is one completion candidate.
+message ChatCompletionChoice {
+    // index is the candidate index.
+    int32 index = 1;
+    // message is the full assistant message (non-streaming).
+    ChatCompletionMessage message = 2;
+    // finishReason is why the completion finished.
+    string finishReason = 3;
+}
+
+// ChatCompletionResponse is the non-streaming completion response.
+message ChatCompletionResponse {
+    // id is the completion id.
+    string id = 1;
+    // object is the object type.
+    string object = 2;
+    // created is the unix timestamp.
+    int64 created = 3;
+    // model is the requested model endpoint name, or the agent name when the
+    // request named no model.
+    string model = 4;
+    // choices are the completion candidates.
+    repeated ChatCompletionChoice choices = 5;
+    // usage reports token counts.
+    Usage usage = 6;
+    // sessionID echoes the conversation thread identifier.
+    string sessionID = 7;
+}
+
+// Usage reports token usage.
+message Usage {
+    // promptTokens is the number of prompt tokens.
+    int32 promptTokens = 1;
+    // completionTokens is the number of completion tokens.
+    int32 completionTokens = 2;
+    // totalTokens is the total token count.
+    int32 totalTokens = 3;
+}
+
+// ChatCompletionStreamChoice is one streaming completion candidate.
+message ChatCompletionStreamChoice {
+    // index is the candidate index.
+    int32 index = 1;
+    // delta is the incremental content.
+    ChatCompletionMessage delta = 2;
+    // finishReason is why the completion finished.
+    string finishReason = 3;
+}
+
+// ChatCompletionStreamResponse is one SSE chunk.
+message ChatCompletionStreamResponse {
+    // id is the completion id.
+    string id = 1;
+    // object is the object type.
+    string object = 2;
+    // created is the unix timestamp.
+    int64 created = 3;
+    // model is the requested model endpoint name, or the agent name when the
+    // request named no model.
+    string model = 4;
+    // choices are the streaming candidates.
+    repeated ChatCompletionStreamChoice choices = 5;
+    // sessionID echoes the conversation thread identifier.
+    string sessionID = 6;
+}

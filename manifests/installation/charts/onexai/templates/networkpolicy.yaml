@@ -1,0 +1,49 @@
+{{- /*
+出向收敛：declserver 是集群里唯一持有 etcd 客户端证书的 Pod。
+
+etcd **没有对象级鉴权** —— 一张能通过 TLS 认证的证书就等于整库读写权（包括集群所有
+Secret）。限制「这张证书能连到哪」不能替代最小权限（etcd 没有），但它能把被盗用后的
+可用面收窄到「只能对 etcd 说话」。
+
+这里只写出向策略：入向保持默认（集群内可达），因为运行时要连它，而
+`kubectl port-forward` 的流量来自节点而不是 Pod，入向白名单会把排查手段一起锁掉。
+
+DNS 必须显式放行：Cilium 在选中 Pod 之后，未列出的出向一律拒绝。
+*/ -}}
+{{- if and .Values.controlplane.enabled .Values.controlplane.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oai-declserver-egress
+  labels:
+    app: oai-declserver
+    {{- include "onexai.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: oai-declserver
+  policyTypes:
+    - Egress
+  egress:
+    # etcd 集群。写成 IPBlock 而不是命名空间选择器：etcd 跑在控制面节点上，
+    # 不是集群里的 Pod。端点从 etcd.servers 推导，避免同一份清单写两遍。
+    - to:
+        {{- range $server := splitList "," .Values.controlplane.etcd.servers }}
+        {{- $u := urlParse $server }}
+        - ipBlock:
+            cidr: {{ required (printf "无法从 %q 解析出主机名" $server) $u.hostname }}/32
+        {{- end }}
+      ports:
+        - { protocol: TCP, port: 2379 }
+    # 集群 DNS。
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+{{- end }}

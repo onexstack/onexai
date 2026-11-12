@@ -1,0 +1,72 @@
+# Package a binary that was already cross-compiled on the host; do not run
+# `go build` inside the container.
+#
+# Why this file exists: the regular Dockerfile builds inside the image, which
+# needs network access to resolve Go modules. This variant consumes the output
+# of `make build PLATFORM=...` and works in air-gapped build environments:
+#
+#   make build PLATFORM=linux_amd64            # cross-compile with CGO_ENABLED=0
+#   docker buildx build --platform linux/amd64 \
+#     --file build/docker/<service>/Dockerfile.runtime-only \
+#     --build-arg ENV=prod --tag <registry>/<service>:<tag> --push .
+#
+# No "# syntax=" line on purpose: BuildKit would fetch the frontend image from
+# Docker Hub, and the embedded frontend supports every instruction used here.
+#
+# CGO must stay off: the SQLite driver is modernc.org/sqlite (CGO-free), and
+# go-m1cpu crashes under some CGO configurations. The Makefile defaults to 0.
+
+# =============================================================================
+# 0) Global Arguments (Must precede the first FROM instruction)
+# =============================================================================
+ARG ENV=prod
+
+# =============================================================================
+# 1) Base Images Preparation
+# =============================================================================
+ARG UID=65532
+ARG GID=65532
+ARG USER=noroot
+
+# --- A. Debian Base Prep ---
+FROM debian:bookworm AS base-debian-prep
+ARG UID
+ARG GID
+ARG USER
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates tzdata wget curl telnet \
+ && rm -rf /var/lib/apt/lists/*
+RUN groupadd -g ${GID} ${USER} 2>/dev/null || true \
+ && useradd -u ${UID} -g ${USER} ${USER} 2>/dev/null || true
+
+# --- B. Distroless Base Prep ---
+FROM gcr.io/distroless/base-debian12:nonroot AS base-distroless-prep
+
+# =============================================================================
+# 2) Selection Logic (prod -> distroless, otherwise -> debian)
+# =============================================================================
+FROM base-distroless-prep AS mode-auto-prod
+FROM base-debian-prep     AS mode-auto-test
+FROM base-debian-prep     AS mode-auto-dev
+FROM mode-auto-${ENV} AS final-base
+
+# =============================================================================
+# 3) Runtime Stage
+# =============================================================================
+FROM final-base AS runtime
+
+# TARGETOS/TARGETARCH are injected by the builder; deliberately no defaults -- a default would override the injected value
+# and point the paths below at the wrong binary.
+ARG TARGETOS
+ARG TARGETARCH
+ARG UID
+ARG GID
+
+WORKDIR /app
+
+# The artifact comes from the host build output (_output/platforms/${TARGETOS}/${TARGETARCH}/...).
+COPY --chown=${UID}:${GID} _output/platforms/${TARGETOS}/${TARGETARCH}/oai-chat-apiserver /app/oai-chat-apiserver
+
+USER ${UID}:${GID}
+
+ENTRYPOINT ["/app/oai-chat-apiserver"]

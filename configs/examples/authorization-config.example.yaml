@@ -1,0 +1,36 @@
+# Kubernetes structured authorization configuration.
+#
+# Point oai-agent-apiserver's authz.authorization-config at a copy of this file.
+# Its authorizers are evaluated in the order written (the first decision other
+# than NoOpinion wins), exactly as kube-apiserver evaluates an
+# AuthorizationConfiguration.
+#
+# The platform's own OPA / CMDB / Casdoor backends remain in the surrounding
+# union; this file is the external-policy-center path. When it is set, the
+# legacy authz.webhook.endpoints list is ignored.
+apiVersion: apiserver.config.k8s.io/v1
+kind: AuthorizationConfiguration
+authorizers:
+  - type: Webhook
+    name: platform-pdp
+    webhook:
+      # Cache a decision for this long. Unauthorized decisions should expire
+      # sooner: "deny, try again" is a more common flow than a stable grant.
+      authorizedTTL: 5m
+      unauthorizedTTL: 30s
+      timeout: 3s
+      subjectAccessReviewVersion: v1
+      matchConditionSubjectAccessReviewVersion: v1
+      # Deny is fail-closed when the webhook is unreachable. NoOpinion lets the
+      # next authorizer answer (and the caller's own fail-closed default apply
+      # if none does).
+      failurePolicy: Deny
+      connectionInfo:
+        type: KubeConfigFile
+        # The kubeconfig's clusters[].server points at a service implementing
+        # authorization.k8s.io/v1 SubjectAccessReview. Auth in the kubeconfig
+        # (token or client certificate) is presented to that service.
+        kubeConfigFile: /etc/onexai/authorizers/platform-pdp.kubeconfig
+      # Optional CEL conditions that decide whether this authorizer is called.
+      # matchConditions:
+      #   - expression: request.user != "system:serviceaccount:onexai:health"

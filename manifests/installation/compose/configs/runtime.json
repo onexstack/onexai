@@ -1,0 +1,10 @@
+{
+  "name": "runtime-echo",
+  "description": "Dependency-free A2A runtime used to verify the compose wiring. It echoes the prompt instead of calling a model.",
+  "version": "v1",
+  "command": "sh",
+  "args": ["-c", "printf '%s\\n' \"$1\"", "sh", "{{prompt}}"],
+  "format": "text",
+  "workdir": "/workspace",
+  "sessionDir": "/data/sessions"
+}

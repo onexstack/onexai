@@ -1,0 +1,57 @@
+# Agent-as-tool: one agent calls another through the agent_invoke_agent
+# capability.
+#
+# Delegation is a declared authority, not an ambient one. The caller names its
+# delegates here; nothing else can be called. The tool is granted to a run only
+# when the selection names at least one delegate, it is authorized against this
+# list at call time, and the chain depth is bounded by
+# agent.delegation.max-depth.
+#
+# The delegate runs as an ordinary run: its own prompt, skills, model and
+# runtime, and its own conversation derived from the caller's. Its answer comes
+# back to the caller as the tool result. The caller's identity travels with it,
+# so delegation never widens what the caller could do.
+apiVersion: agent.onexai.io/v1alpha1
+kind: Agent
+metadata:
+  name: incident-commander
+  namespace: default
+spec:
+  enabled: true
+  displayName: Incident commander
+  description: Coordinates an incident and delegates the investigation.
+  promptRef:
+    name: incident-commander
+  delegates:
+    - name: log-investigator
+    - name: change-reviewer
+  # sessionTools grants the session capability over MCP: list, read, continue
+  # and fork the caller's own conversations. It is off by default because those
+  # tools reach conversations other than the one in progress.
+  sessionTools: true
+---
+apiVersion: agent.onexai.io/v1alpha1
+kind: Agent
+metadata:
+  name: log-investigator
+  namespace: default
+spec:
+  enabled: true
+  displayName: Log investigator
+  description: Reads logs and reports what happened.
+  promptRef:
+    name: log-investigator
+  knowledgeBases:
+    - name: runbooks
+---
+apiVersion: agent.onexai.io/v1alpha1
+kind: Agent
+metadata:
+  name: change-reviewer
+  namespace: default
+spec:
+  enabled: true
+  displayName: Change reviewer
+  description: Reviews recent changes for a plausible cause.
+  promptRef:
+    name: change-reviewer

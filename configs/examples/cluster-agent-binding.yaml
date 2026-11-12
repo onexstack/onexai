@@ -1,0 +1,36 @@
+# 全空间值班组命令授权。
+#
+# 把 chat 命令目录里 duty 组（"Oncall 相关命令:"）的全部命令授予所有命名空间
+# 的所有智能体。namespaces 的单个 "*" 是显式的全空间语义：以后新建的命名空间
+# 以及其中的智能体自动在受众内，不需要再改这个对象。
+#
+# 命令按标签整组授予，而不是逐个列名字：每个 Command 对象都带
+# agent.onexstack.io/group=<组名>，所以 duty 组以后新增的命令会自动落进这条
+# 授权，不需要再编辑对象。commands 仍可写，与 commandSelector 取并集。
+#
+# 注意：这条授权包含 close / hand / assign / mark 等工单写命令，属于平台级
+# 高危预设。审计时读这一个对象即可；撤销时删除它或把 enabled 置为 false。
+apiVersion: agent.onexai.io/v1alpha1
+kind: ClusterAgentBinding
+metadata:
+  name: oncall-duty-all
+  annotations:
+    # 控制面用于审计的创建者标记；手工 apply 时保留管理员身份。
+    onexai.io/created-by: admin
+spec:
+  enabled: true
+  displayName: 值班组命令（全空间）
+  description: 将 catalog duty 组全部命令授予所有命名空间的所有智能体，新建智能体自动生效。
+  # "*" 必须单独出现，与具体命名空间混用会被 API 拒绝。
+  namespaces:
+    - "*"
+  # 空选择器 = 目标空间内（含以后新建）的全部智能体。
+  agentSelector: {}
+  # 按目录标签选命令：duty 组的全部命令（oncall/duty/close/invite/hand/open/
+  # save/level/assign/chat/mark），以及以后加入该组的命令。
+  commandSelector:
+    matchExpressions:
+      - key: agent.onexstack.io/group
+        operator: In
+        values:
+          - duty

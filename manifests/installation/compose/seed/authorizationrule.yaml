@@ -1,0 +1,90 @@
+# Authorization for the example echo agent. The secure profile enables OPA
+# authorization, and the policy denies anything no rule allows.
+#
+# subjectKinds accepts User/Group/ServiceAccount only. A name of "*" expands to
+# subject_id ["*"], which the Rego policy matches for every caller of that kind;
+# listing all three covers browser (user), group-based, and AK/SK (service
+# account) callers.
+apiVersion: agent.onexai.io/v1alpha1
+kind: AuthorizationRule
+metadata:
+  name: allow-runtime-echo
+  namespace: default
+spec:
+  enabled: true
+  description: Allow every caller to run the compose echo agent.
+  subjects:
+    - kind: User
+      name: "*"
+    - kind: Group
+      name: "*"
+    - kind: ServiceAccount
+      name: "*"
+      namespace: default
+  agentNames:
+    - runtime-echo
+  resource:
+    kind: agent
+    names:
+      - runtime-echo
+  verbs:
+    - use
+  effect: Allow
+---
+# The run path also checks the agent's namespace. This rule grants every
+# namespace to the same agent.
+apiVersion: agent.onexai.io/v1alpha1
+kind: AuthorizationRule
+metadata:
+  name: allow-runtime-echo-namespace
+  namespace: default
+spec:
+  enabled: true
+  description: Allow every caller to use the compose echo agent's namespace.
+  subjects:
+    - kind: User
+      name: "*"
+    - kind: Group
+      name: "*"
+    - kind: ServiceAccount
+      name: "*"
+      namespace: default
+  agentNames:
+    - runtime-echo
+  resource:
+    kind: namespace
+    names:
+      - "*"
+  verbs:
+    - use
+  effect: Allow
+---
+# 控制台资源守卫的读基线。
+#
+# 守卫的读过滤在 additive 模式下是“拒绝清单”：没有这条规则时未匹配的行仍然
+# 可见（旧行为）；有了它，操作员可以只写 Deny 规则来收紧某个资源或命名空间，
+# 而不必为每个现有资源补一条 Allow。迁移到 authoritative 模式前必须存在这样
+# 一条基线，否则所有未显式授权的行都会从列表里消失。
+apiVersion: agent.onexai.io/v1alpha1
+kind: AuthorizationRule
+metadata:
+  name: baseline-read-all
+  namespace: default
+spec:
+  enabled: true
+  description: 所有登录用户可读所有资源；需要收紧时写 Deny 规则。
+  subjects:
+    - kind: User
+      name: "*"
+    - kind: Group
+      name: "*"
+    - kind: ServiceAccount
+      name: "*"
+      namespace: default
+  resources:
+    - kind: "*"
+      names:
+        - "*"
+  verbs:
+    - get
+  effect: Allow

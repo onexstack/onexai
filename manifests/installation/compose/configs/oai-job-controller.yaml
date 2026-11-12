@@ -1,0 +1,29 @@
+# oai-job-controller for the compose stack.
+#
+# It reconciles batch.onex.io Job/CronJob objects served by oai-declserver and
+# submits agent runs to oai-agent-apiserver. No Kubernetes cluster is involved.
+
+kubeconfig: /etc/onexai/declserver.kubeconfig
+
+agent:
+  endpoint: "http://oai-agent-apiserver:8080"
+  timeout: "30s"
+
+agent-aksk:
+  api-key: "oai-job-controller"
+  # Supplied through OAI_JOB_CONTROLLER_AGENT_AKSK_SECRET_KEY.
+  secret-key: ""
+
+job-types: []
+provider-poll-interval: "2s"
+max-concurrent-reconciles: 20
+
+# One instance in compose, so there is no leadership to contend for. The
+# mapstructure key is leader-election (the flag is --leader-elect); using the
+# flag spelling here silently leaves the default (true) in place.
+leader-election: false
+leader-election-id: "oai-job-controller"
+leader-election-namespace: "default"
+
+metrics-addr: ":8080"
+health-probe-addr: ":8081"

@@ -1,0 +1,357 @@
+# oai-chat-apiserver configuration — Lark chatbot backend.
+#
+# The top-level keys map to the ServerOptions mapstructure tags. Load with:
+#   oai-chat-apiserver --config configs/examples/oai-chat-apiserver.example.yaml
+
+# HTTP listen address (unsecured).
+insecure:
+  addr: ":8082"
+
+# Database for ticket persistence (store.source=sql). Empty = no DB.
+# dialect selects the backend: mysql | postgres (empty = mysql). See pkg/dbschema.
+# Keys are kebab-case here (viper/mapstructure); oai-controller-manager spells the
+# same block camelCase because it is decoded strictly — see its config.
+coredb:
+  dialect: mysql
+  addr: 127.0.0.1:3306
+  username: onex
+  password: "CHANGE_ME"
+  database: onex
+  log-level: 0
+
+# Authentication and authorization.
+#
+# anonymous-auth and authorization-mode: AlwaysAllow are refused at startup: the
+# first hands an unauthenticated caller a usable identity, the second an admin
+# one.
+#
+# Leave the mode empty for normal token validation. AlwaysDeny is not the safe
+# middle between the two: it refuses every request, a valid token included.
+auth:
+  anonymous-auth: false
+  authorization-mode: ""
+
+# JWT signing key and expiry.
+#
+# The key must be set explicitly and must not be the built-in placeholder
+# ("change-me-in-production" or the onexstack default "CHANGE_ME"): the server
+# refuses to start on either. This value is a development key; replace it for any
+# deployment that is reachable by more than its operator. It may be overridden
+# with OAI_CHAT_APISERVER_JWT_KEY.
+jwt:
+  # Must match oai-agent-apiserver.dev.yaml: this service mints the token, that
+  # one validates it on /v1/admin. Changing it here alone breaks the management
+  # surface rather than the login.
+  #
+  # Left empty on purpose. A committed sample must not carry a working signing
+  # key: this file goes into git, and a key everyone can read mints tokens
+  # everyone can forge. Provide it per-deployment — a real key in the operator's
+  # own config, or OAI_CHAT_APISERVER_JWT_KEY in the environment. The server
+  # refuses to start on an empty or built-in key, so a silent fallback cannot happen.
+  key: ""
+  expired: "24h"
+
+# Lark/Feishu application — the Helper chatbot app. Requires im:message.group_msg
+# to receive all group messages (relayed to the onexai chat TUI).
+lark:
+  app-id: "cli_xxx"
+  app-secret: ""
+  url: "https://open.larksuite.com"
+  # Browser callback for Feishu OAuth login, registered with the Lark app under
+  # 安全设置 → 重定向 URL. Leave empty to disable Feishu login. When set, the
+  # console's login page offers "使用飞书登录".
+  oauth-redirect-uri: "http://localhost:3010/auth/lark/callback"
+  event-mode: "websocket"        # websocket | webhook
+  verification-token: ""
+  bot-name: "Helper"
+
+# oai-agent-apiserver client for AI commands (/askai, /clear, /agent, /aiassets).
+agent:
+  endpoint: "http://localhost:8080"
+  # 3m, not 2m: the agent client's timeout caps the context a caller passes, and the
+  # closing summary asks for 3 minutes of it. At 2m the client would cut the run short
+  # before the summary path's own bound, and the failure would look like a model
+  # problem rather than a configuration one.
+  timeout: "3m"
+  retry-count: 2
+
+# MCP listener that publishes this service's bot commands as MCP tools to
+# oai-agent-apiserver. Disabled by default — the whole block is commented out, and
+# uncommenting a line is how a value is changed. The keys are also settable as
+# --mcp.* flags.
+#
+# Auth is a self-contained optional bearer: an empty token leaves the listener
+# open. The caller identity travels in the x-user-id header (see --mcp.user-id
+# for the fallback used when a client sends none) and decides job/cronjob
+# ownership, so leave the listener on a trusted network.
+#
+# mcp:
+#   enabled: false
+#   addr: ":8091"
+#   name: "oai-chat-apiserver"
+#   version: "1.0.0"
+#   token: ""
+#   user-id: ""
+#   # Re-read the custom-command catalog and rebuild the published MCP tools.
+#   # A command created after startup becomes a tool within this interval.
+#   refresh-interval: "10s"
+
+# Session lifecycle, streaming, de-duplication, roles and agent backends.
+#
+# The whole block is optional: every key below is commented out because the
+# defaults are the behaviour of this service before the block existed, so
+# uncommenting a line is how a value is changed and deleting it is how the change
+# is undone. The keys are also settable as --chat.* flags.
+#
+# chat:
+#   session:
+#     idle-timeout: 15m
+#     event-idle-timeout: 2h
+#     close-timeout: 150s
+#     busy-stale-lock-max-held: 2m
+#     max-queued-messages: 5
+#     max-concurrent-turns: 3      # turns that may run at once in one conversation; 1 = serialise and queue
+#     turn-timeout: 5m
+#     data-dir: ""                 # empty = <home>/.onexai/chat/sessions
+#   streaming:
+#     enabled: true
+#     interval: 1500ms
+#     min-delta-chars: 30
+#     max-chars: 2000
+#     print-frequency-ms: 50
+#     print-step: 2
+#     print-strategy: fast
+#   progress:
+#     style: card
+#     max-entries: 10
+#     interval: 250ms
+#   dedup:
+#     enabled: true
+#     ttl-sec: 300
+#     max-entries: 4096
+#     max-event-age-sec: 7200
+#   # Feishu account binding. A user sends the code the console showed them as
+#   # `/bind-onex <code>`; claim-ttl is how long that claim stays readable by
+#   # iam,
+#   # which polls for it. It must be strictly greater than iam's
+#   # feishu.code-ttl (10m by default): a claim that expires first does not
+#   # fail loudly, it makes iam report a binding the user did speak as expired.
+#   peer-bind:
+#     claim-ttl: 15m
+#   # NOTE: the SRE and admin lists are NOT configured here. They live in the
+#   # chat.setting table (PostgreSQL schema chat; onexai_chat_setting on MySQL),
+#   # one JSON array of Lark user_ids per key, and one key per role:
+#   #   onexai-sre-user-id    -> ["user_id_a"]
+#   #   onexai-admin-user-id  -> ["user_id_b"]   (every SRE is an admin as well)
+#   # Editing a row takes effect within a minute, with no restart. A missing row
+#   # or an empty array means nobody holds that role — fail-closed, so a
+#   # deployment that has just been switched over is administered by nobody
+#   # until the row is written. See docs/design/console-platform.md.
+#   i18n:
+#     # Replies are written in this language where a translation exists; a string
+#     # with none is sent as written in the source language. /doctor reports which
+#     # language is in effect.
+#     language: zh                 # zh | zh-TW | en
+#   login:
+#     # local checks a bcrypt hash in chat.user and can be enabled. The other two
+#     # still mint an identity from unverified input and must stay off unless the
+#     # deployment explicitly accepts that bypass.
+#     allow-local: true            # password login / change, verified against chat.user
+#     allow-registration: true     # POST /v1/auth/register (open registration)
+#     bootstrap-admin: false       # first account becomes admin while the table is empty
+#     allow-lark: false            # legacy lark_token provider; not verified
+#     allow-apikey: false          # legacy api_key provider; not verified
+#     token-ttl: 24h               # lifetime of an issued token
+#   agents:
+#     default-backend: llm         # llm | cli
+#     cli:
+#       # The local agent-CLI backend. It is the one configuration that lets a
+#       # chat message run a process on this host, so it ships off, and the server
+#       # refuses to start with it on under auth.anonymous-auth or
+#       # auth.authorization-mode: AlwaysAllow — the two settings above.
+#       enabled: false
+#       max-sessions: 4
+#       workspace-root: ""         # required when enabled; an absolute path
+#       allowed-dirs: []
+#       idle-timeout: 15m
+#       turn-timeout: 5m
+#       permission-mode: stdio     # stdio (ask the user) | skip (bypass)
+#       allowed-tools: []
+#       disallowed-tools: []
+#       model: ""
+#       max-line-bytes: 8388608
+
+# Duty provider. "regen" selects the Regen implementation for groups that still
+# point at a legacy schedule_id and mirrors tickets as incidents; "none" keeps
+# tickets local. Native schedules (chat.oncall_* tables) do not use the
+# provider and load either way. An empty value infers "regen" whenever
+# backend.regen-endpoint is set, so existing deployments need no change.
+#
+# The escalation worker pages people, so it is off by default. Manual escalation
+# from the console still works. Turn it on only after verifying the Lark DM
+# scope and backend.regen-user-map.
+# duty:
+#   provider: none
+#   escalation-worker-enabled: false
+#   escalation-interval: 30s
+
+# Auxiliary HTTP backends. Zadig backs the /pipeline command, which triggers one
+# of its custom workflows; leave the block out and that command reports
+# "Zadig 未配置".
+# backend:
+#   zadig-endpoint: ""             # base URL, without the /openapi suffix
+#   zadig-token: ""                # API token (账号设置 -> API Token); a secret —
+#                                  # prefer OAI_CHAT_APISERVER_BACKEND_ZADIG_TOKEN over
+#                                  # this key and over --backend.zadig-token, which
+#                                  # is visible in `ps`
+#   zadig-project: ""              # default for the command's --project flag
+#
+# Regen backs the duty commands (/oncall, /duty, /close, /open, /save) and keeps
+# every chat.ticket row in step with a Regen incident. Leave it out and the duty
+# store stays empty — /oncall --list reports no groups and tickets are local
+# only.
+#
+# An account that does not exist in Regen (or a stale password) has the same
+# effect: the login 401s, the schedules never load, and /oncall and /duty report
+# every module as 不存在. Create/rename the account in the Regen admin UI first —
+# the username *is* the login email.
+#   regen-endpoint: ""             # base URL, e.g. http://regen.example.com:8080
+#   regen-username: ""             # the account's login email; Regen has no API key
+#   regen-password: ""             # a secret — prefer
+#                                  # OAI_CHAT_APISERVER_BACKEND_REGEN_PASSWORD over
+#                                  # this key and over --backend.regen-password,
+#                                  # which is visible in `ps`
+#   regen-user-map: ""             # explicit on-call name -> Lark user_id
+#                                  # override, as "a@x.com=ou_1,b@x.com=ou_2".
+#                                  # Names that miss this map are resolved
+#                                  # through the account's Feishu binding, so a
+#                                  # user selected in the console is enough. Keep
+#                                  # an entry only for external people or to pin
+#                                  # a user_id.
+#   duty-maintainer-user-id: ""    # Lark user_id shown as the fallback on-caller
+#                                  # on the /duty card. Display-only.
+#   p4-defer-groups: ""            # comma-separated module codes whose P4 tickets
+#                                  # do not page the on-call up front; /level
+#                                  # invites them when the ticket is escalated.
+
+# ── 服务间凭据 ──────────────────────────────────────────────────────────────
+#
+# 写对端绑定（/v1/peer-agents、/v1/peer-bind-claims）的调用方凭据。
+#
+# **为什么是一条列表而不是一个共享密钥**：绑定回答的是"这个聊天身份是哪个业务
+# 账号"，写者必须可归因，那个答案才有意义——chat.peer_agent.source 记的就是哪条
+# 凭据写的这一行，而单一共享密钥会让每一行都写着同一句话；撤销一个集成方也会连
+# 带撤销所有别的。
+#
+# 空列表等于把这些端点整个关掉（中间件直接拒绝）。这是刻意的：把"没配置"读成
+# "不需要认证"，是唯一会把它们开在最不想要它们的部署上的读法。
+#
+# 本文件只声明 chat 下这几个键；其余 chat.* 的默认值来自 pkg/options 的
+# NewChatOptions，改一项不需要把整块抄一遍。
+chat:
+  # OIDC-compatible token issuance. Off by default; when enabled it publishes
+  # /.well-known/openid-configuration and /keys for a Kubernetes authenticator.
+  # An empty key-file generates an ephemeral key (tokens die on restart); a
+  # deployed service should point it at a mounted RSA private key.
+  oidc:
+    enabled: false
+    issuer-url: ""
+    audiences: []
+    key-file: ""
+    key-id: ""
+    token-ttl: "1h"
+
+  internal-credentials: []
+    # - secret: ""      # 由 OAI_CHAT_APISERVER_CHAT_INTERNAL_CREDENTIALS 注入
+    #   subject: "onex-iam"
+
+  # ── agent 命令授权（chat.agent_command）的快照寿命 ────────────────────────
+  #
+  # 这里显式写出来只是因为它们决定"改一条规则多久生效"：三条都取自
+  # internal/chat/pkg/agentcmd 的同名常量，rules-ttl 自 2026-10-12 起由 15s 收成 5s。
+  # 其余两项（agents-ttl 60s / skills-ttl 2m）写出来只为可读。
+  agent-command:
+    rules-ttl: 5s
+    # 一个 agent 的标签（tags / namespace）多久算过期。
+    agents-ttl: 60s
+    # 一个 agent 的 skill 命令列表多久算过期；枚举它最贵，所以活得最久。
+    skills-ttl: 2m
+    # 一个 agent 绑定的自定义命令列表多久算过期。绑定后要马上能测，所以短。
+    customs-ttl: 15s
+
+  # ── Browser WebSocket (chat.websocket) ────────────────────────────────────
+  #
+  # A WebSocket handshake is not covered by the browser's same-origin policy:
+  # without a check, any page can open a socket to this server with the user's
+  # cookies. allowed-origins closes that hole; an empty list keeps the
+  # historical allow-all behaviour, so an existing console on another origin
+  # keeps working until the list is filled in.
+  websocket:
+    allowed-origins: []          # e.g. ["https://console.example.com"]
+    max-concurrent-frames: 64    # inbound frames handled at once, per hub
+
+  # ── 会话的默认 agent ──────────────────────────────────────────────────────
+  #
+  # `@default` 这个引用按**发言者**是否属于本租户取其中之一（见
+  # internal/chat/biz/v1/bot/schedule.go）：租户内的人（Lark 给了 user_id）取
+  # internal-default，租户外的人（认不出）取 external-default。
+  #
+  # 两个默认值按**受众**分开，且都用不带运维工具链的内建 agent：
+  #   · internal-default: fz-public —— 租户内、未绑定自己助教的成员，拿到通用助手
+  #     （无 MCP，见 deny-fz-public-mcp）。
+  #   · external-default: fz-visitor —— 平台认不出（未绑定/非会员）的外部说话人，
+  #     拿到**零能力**访客助手：无知识库、无 Skill、无 MCP，只会引导开通会员。
+  #   注意这两个都不是 fz-default：那个带 zke-kubeagent / zadig-mcp 运维工具链，
+  #   只能被显式 `/agent fz-default` 点名，绝不能作默认。
+  #
+  # **external-default 的代码默认是空的**（fail-closed：认不出是谁就什么都别给），
+  # 所以这一行是把它打开的地方。若部署里没有 fz-visitor（种子没跑），这个名字解析
+  # 不出任何东西，外部发言者会拿到一张"没有可用 agent"的卡片——与留空相同，不会更糟。
+  internal-default: fz-public
+  external-default: fz-visitor
+
+  # Dissolving closed ticket groups.
+  #
+  # The bot already promises this when a ticket closes — "本群将在 1 天后自动解散" —
+  # and until this sweep existed nothing did it. Off by default because the call
+  # cannot be undone and Lark keeps no history for a group it dissolved: the
+  # messages are gone from the platform the moment it returns. The sweep
+  # archives them first, and refuses to dissolve a group whose archive failed,
+  # but a deployment should still turn this on having decided that its closed
+  # groups should go.
+  dissolve:
+    enabled: false              # true: closed, unsaved groups are dissolved after the grace period
+    grace-after-close: "24h"    # how long after /close a group is left alone
+    interval: "1m"              # how often a pass runs
+    batch: 50                   # groups handled per pass
+    history-limit: 500          # messages archived per group
+  # Policy-backed role resolution.
+  #
+  # Off: the SRE/admin questions are answered from the chat.setting lists, which
+  # is what every deployment did before this switch existed. On: they are
+  # answered by AuthorizationRule objects (resource_kind "role"), with
+  # the lists demoted to "who is in which group" — a rule may name a person or a
+  # group, and a group deny wins over a person grant. Turning this on without
+  # writing rules refuses every role, so seed the rules first.
+  role-authz:
+    enabled: false
+    rule-table-refresh-interval: "60s"
+
+controlplane:
+  kubeconfig: /etc/onexai/declserver.kubeconfig
+  namespace: ""
+  sync-timeout: 30s
+  resync-period: 60s
+
+# How the control-plane resources (duty groups, peer bindings) are read.
+#   controlplane (default) — from the informer cache.
+#   mirror-list — List from the PostgreSQL projection, Get still from the cache.
+# Leaving this alone changes nothing; switching a kind over is a YAML edit.
+store:
+  read-backend: controlplane
+  read-backends: {}
+  mirror:
+    schema: mirror
+    max-lag: "10m"
+    count-mode: exact
+  get-cache-size: 10000

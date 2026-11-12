@@ -1,0 +1,72 @@
+// Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// This file defines the Protobuf messages for managing ScheduledRuns.
+//
+syntax = "proto3"; // Specifies the syntax version used in this file.
+
+package agent.v1;
+
+option go_package = "github.com/onexstack/onexai/pkg/api/agent/v1;v1";
+
+// ScheduledRun runs an agent on a cron schedule.
+message ScheduledRun {
+    string name = 1;
+    string namespace = 2;
+    string displayName = 3;
+    string description = 4;
+    string status = 5;
+    string owner = 6;
+    string createdBy = 7;
+    string agent = 8;
+    string schedule = 9;
+    string timeZone = 10;
+    string prompt = 11;
+    bool paused = 12;
+    int64 executionTimeoutNanos = 13;
+    string lastExecutionId = 14;
+    int64 lastScheduledAt = 15;
+    map<string, string> labels = 16;
+    int64 createdAt = 17;
+    int64 updatedAt = 18;
+    // nextScheduledAt is the next firing time in Unix milliseconds, computed
+    // from schedule/timeZone/paused when the object is read. Zero means the
+    // schedule is paused or its expression cannot be parsed.
+    int64 nextScheduledAt = 19;
+}
+
+message CreateScheduledRunRequest { ScheduledRun scheduledRun = 1; }
+message CreateScheduledRunResponse { ScheduledRun scheduledRun = 1; }
+message UpdateScheduledRunRequest { ScheduledRun scheduledRun = 1; }
+message UpdateScheduledRunResponse { ScheduledRun scheduledRun = 1; }
+message DeleteScheduledRunRequest {
+    // @gotags: uri:"name"
+    string name = 1;
+}
+message DeleteScheduledRunResponse {}
+message GetScheduledRunRequest {
+    // @gotags: uri:"name"
+    string name = 1;
+}
+message GetScheduledRunResponse { ScheduledRun scheduledRun = 1; }
+message ListScheduledRunRequest {
+    // @gotags: form:"offset"
+    int32 offset = 1;
+    // @gotags: form:"limit"
+    int32 limit = 2;
+}
+message ListScheduledRunResponse {
+    repeated ScheduledRun scheduledRuns = 1;
+    int64 count = 2;
+}

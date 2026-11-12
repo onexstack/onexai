@@ -1,0 +1,9 @@
+{
+  "name": "codex",
+  "description": "Codex A2A runtime",
+  "version": "v1",
+  "command": "codex",
+  "args": ["exec", "{{prompt}}"],
+  "format": "text",
+  "workdir": "/workspace"
+}

@@ -1,0 +1,15 @@
+{
+  "name": "claude",
+  "description": "Claude Code A2A runtime. Requires the CLI in the image and ANTHROPIC_API_KEY (or the CLI's own login state).",
+  "version": "v1",
+  "command": "claude",
+  "args": [
+    "-p", "{{prompt}}",
+    "--output-format", "stream-json",
+    "--verbose",
+    "--permission-mode", "bypassPermissions"
+  ],
+  "format": "claude",
+  "workdir": "/workspace",
+  "sessionDir": "/data/sessions"
+}

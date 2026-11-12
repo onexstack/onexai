@@ -1,0 +1,75 @@
+// Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// This file defines the Protobuf messages for scheduled agent runs.
+//
+// The schedule itself is a declarative object (ScheduledRun); what this file
+// carries is its execution history — the record of what actually ran, when, and
+// with which conversation.
+//
+syntax = "proto3"; // Specifies the syntax version used in this package.
+
+package agent.v1;
+
+option go_package = "github.com/onexstack/onexai/pkg/api/agent/v1;v1";
+
+// ScheduledExecution is one firing of a schedule.
+message ScheduledExecution {
+    string id = 1;
+    string namespace = 2;
+    string schedule = 3;           // Name of the ScheduledRun this fired.
+    string trigger = 4;            // "scheduled" | "manual"
+    string prompt = 5;             // Prompt the execution ran.
+    string sessionId = 6;          // Conversation the execution created.
+    string runId = 7;              // Run the execution produced.
+    string state = 8;              // "pending" | "running" | "completed" | "failed" | "canceled"
+    string failureReason = 9;      // Why it failed, when it did.
+    int64 startedAt = 10;          // unix milliseconds
+    int64 finishedAt = 11;         // unix milliseconds; zero while running
+    int64 createdAt = 12;          // unix milliseconds
+}
+
+message ListScheduledExecutionRequest {
+    // name is the ScheduledRun's name.
+    string name = 1;
+    // namespace is the schedule's namespace; empty means the default.
+    string namespace = 2;
+    // limit caps the page. Zero returns every execution.
+    int32 limit = 3;
+}
+
+message ListScheduledExecutionResponse {
+    repeated ScheduledExecution executions = 1;
+}
+
+message TriggerScheduledRunRequest {
+    // @gotags: uri:"name"
+    string name = 1;
+}
+
+message TriggerScheduledRunResponse {
+    ScheduledExecution execution = 1;
+}
+
+message CancelScheduledExecutionRequest {
+    // name is the ScheduledRun's name.
+    // @gotags: uri:"name"
+    string name = 1;
+    // @gotags: uri:"id"
+    string id = 2;                 // Execution to cancel.
+}
+
+message CancelScheduledExecutionResponse {
+    ScheduledExecution execution = 1;
+}

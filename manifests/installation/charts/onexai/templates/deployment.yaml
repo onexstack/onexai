@@ -1,0 +1,152 @@
+{{- /*
+每服务一个 Deployment。整份模板里没有服务名——差异全部来自 values 的
+kind/ports/config/probes（见 _helpers.tpl）。
+*/ -}}
+{{- range $svc := (include "onexai.serviceNames" . | splitList " ") }}
+{{- $s := index $.Values.services $svc }}
+{{- $ctx := dict "root" $ "svc" $svc }}
+{{- $sched := mergeOverwrite (deepCopy (default (dict) $.Values.global.scheduling)) (default (dict) $s.scheduling) }}
+{{- $replicas := $.Values.global.replicas }}
+{{- if hasKey $s "replicas" }}{{ $replicas = $s.replicas }}{{ end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $svc }}
+  labels:
+    app: {{ $svc }}
+    {{- include "onexai.labels" $ | nindent 4 }}
+spec:
+  replicas: {{ $replicas }}
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 600
+  selector:
+    matchLabels:
+      app: {{ $svc }}
+  # 单副本服务（oai-chat 的进程内 WS/Lark 状态、onexai 的 /data 工作区）不能用
+  # maxSurge=1：滚动时会先起第二个实例。
+  strategy:
+    {{- if eq (int $replicas) 1 }}
+    type: Recreate
+    {{- else }}
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    {{- end }}
+  template:
+    metadata:
+      labels:
+        app: {{ $svc }}
+      annotations:
+        # 配置一变，这里的 sha 就变，Pod 随之滚动。
+        checksum/config: {{ include "onexai.configSecret" $ctx | sha256sum }}
+        {{- if and $.Values.controlplane.enabled $s.controlPlane }}
+        # 控制面换了证书或 token 时，运行时也要跟着重建：它的 kubeconfig 拿的是旧值。
+        checksum/controlplane: {{ include "onexai.controlplaneSecrets" $ | sha256sum }}
+        {{- end }}
+        {{- with $.Values.global.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- if $s.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ $s.terminationGracePeriodSeconds }}
+      {{- end }}
+      {{- if and $.Values.controlplane.enabled $s.controlPlane }}
+      # Secret 卷默认落成 root:root 0440，而容器以镜像里的 65532 运行 —— 没有
+      # fsGroup 时控制面 kubeconfig 读不了，启动即退出：
+      # `open /etc/onexai/controlplane/kubeconfig: permission denied`。
+      # 只给挂了控制面 kubeconfig 的 Pod 加，别的服务不需要也拿不到这份权限。
+      securityContext:
+        fsGroup: 65532
+      {{- end }}
+      {{- with $.Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      affinity:
+        {{- with $sched.nodeAffinity }}
+        nodeAffinity:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: {{ $svc }}
+                topologyKey: kubernetes.io/hostname
+      # 同服务副本按主机打散；ScheduleAnyway 表示放不下时仍可调度，不 Pending。
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: {{ $svc }}
+      {{- with $sched.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $svc }}
+          {{- /*
+          必须把 svcImage 传下去：`onexai.image` 的取值顺序是
+          `services.<svc>.image.tag` → `global.image.tag`，而不传这一项时它恒等于
+          后者——`--set services.<svc>.image.tag=...` 会看起来成功、实际什么都不改
+          （2026-10-23 单服务回滚时踩到）。values 里没有 per-service image 时
+          `$s.image` 是 nil，helper 照样落回 global。
+          */}}
+          image: {{ include "onexai.image" (dict "root" $ "svcName" $svc "svcImage" $s.image) }}
+          imagePullPolicy: {{ $.Values.global.image.pullPolicy }}
+          command:
+            {{- include "onexai.command" (dict "svc" $svc "kind" $s.kind) | nindent 12 }}
+          # MCP 的工具会往工作目录写脚手架产物（os.Getwd() 就是它），而根文件系统
+          # 只读，所以必须换到可写的 /data。
+          workingDir: /data
+          ports:
+            {{- range $p := $s.ports }}
+            - name: {{ $p.name }}
+              containerPort: {{ $p.containerPort }}
+              protocol: TCP
+            {{- end }}
+          env:
+            {{- include "onexai.env" $ctx | nindent 12 }}
+          {{- include "onexai.probes" $ctx | nindent 10 }}
+          resources:
+            {{- toYaml (default $.Values.global.resources $s.resources) | nindent 12 }}
+          volumeMounts:
+            # subPath 只投一个文件，/app/etc 其余部分仍是镜像里的内容。
+            - { name: config, mountPath: /app/etc/{{ $svc }}.yaml, subPath: {{ $svc }}.yaml, readOnly: true }
+            {{- if and $.Values.controlplane.enabled $s.controlPlane }}
+            # 配置文件里的 controlplane.kubeconfig 指向这个目录里的 kubeconfig。
+            - { name: controlplane-kubeconfig, mountPath: /etc/onexai/controlplane, readOnly: true }
+            {{- end }}
+            - { name: data-dir, mountPath: /data }
+            - { name: host-time, mountPath: /etc/localtime, readOnly: true }
+            - { name: tmp-dir, mountPath: /tmp }
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          securityContext:
+            {{- toYaml $.Values.global.containerSecurityContext | nindent 12 }}
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: config
+          secret:
+            secretName: {{ $svc }}
+            defaultMode: 420
+            items:
+              - key: {{ $svc }}.yaml
+                path: {{ $svc }}.yaml
+        {{- if and $.Values.controlplane.enabled $s.controlPlane }}
+        - name: controlplane-kubeconfig
+          secret: { secretName: oai-controlplane-kubeconfig, defaultMode: 288 }
+        {{- end }}
+        # 可写卷：HOME=/data，MCP 工具也往这里写。
+        - { name: data-dir, emptyDir: {} }
+        - { name: host-time, hostPath: { path: /etc/localtime, type: FileOrCreate } }
+        - { name: tmp-dir, emptyDir: {} }
+{{- end }}

@@ -1,0 +1,71 @@
+# syntax=docker/dockerfile:1.7
+
+# Optional image for oai-agent-runtime with a real command-line agent installed.
+#
+# The default compose stack uses manifests/installation/compose/Dockerfile with the echo runtime
+# in configs/runtime.json: it exercises the A2A surface without Node or a vendor
+# CLI. Use this image only when you want the runtime to drive Claude Code:
+#
+#   docker compose build --build-arg INSTALL_CLAUDE_CLI=1 oai-agent-runtime
+#   (and point the runtime at configs/runtime.claude.json)
+#
+# It needs ANTHROPIC_API_KEY (or the CLI's own login state) at run time.
+
+ARG GO_IMAGE=golang:1.27.0
+ARG NODE_IMAGE=node:22-bookworm-slim
+
+FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS build
+
+ARG TARGETOS
+ARG TARGETARCH
+ARG GOPROXY
+
+ENV CGO_ENABLED=0
+ENV GOPROXY=${GOPROXY}
+WORKDIR /src
+
+COPY go.mod go.sum ./
+# See manifests/installation/compose/Dockerfile: third_party must exist for the local replaces,
+# and ../onexstack is outside the build context.
+COPY third_party ./third_party
+RUN go mod edit -dropreplace=github.com/onexstack/onexstack
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+COPY . .
+# COPY above restores the repository go.mod, so drop the outside-context replace
+# again before building.
+RUN go mod edit -dropreplace=github.com/onexstack/onexstack
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -buildvcs=false -ldflags "-s -w" \
+      -o /out/service ./cmd/oai-agent-runtime
+
+FROM ${NODE_IMAGE} AS runtime
+
+ARG INSTALL_CLAUDE_CLI=0
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl tzdata \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN if [ "${INSTALL_CLAUDE_CLI}" = "1" ]; then \
+      npm install -g @anthropic-ai/claude-code; \
+    fi
+
+RUN groupadd -g 65532 noroot 2>/dev/null || true \
+ && useradd -u 65532 -g 65532 -M -d /data/home -s /usr/sbin/nologin noroot 2>/dev/null || true
+
+COPY --from=build /out/service /app/service
+
+ENV HOME=/data/home
+ENV GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn
+
+RUN mkdir -p /data/home /data/sessions /workspace \
+ && chown -R 65532:65532 /data /workspace
+
+USER 65532:65532
+
+ENTRYPOINT ["/app/service"]

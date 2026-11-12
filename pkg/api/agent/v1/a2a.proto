@@ -1,0 +1,272 @@
+// Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// This file defines the A2A execution and AgentCard messages shared by the
+// unified Agent resource and the A2A management endpoints.
+//
+syntax = "proto3";
+
+package agent.v1;
+
+option go_package = "github.com/onexstack/onexai/pkg/api/agent/v1;v1";
+
+import "agent/v1/clientconfig.proto";
+
+// AgentExecution selects how an agent runs.
+message AgentExecution {
+    // mode is inproc or a2a. Empty means inproc.
+    string mode = 1;
+    // a2a is required when mode is a2a.
+    A2AExecution a2a = 2;
+}
+
+// A2AExecution is the outbound A2A contract.
+message A2AExecution {
+    string runtimeRef = 1;
+    string endpoint = 2;
+    // source is card-url, json, manual or runtime. external only.
+    string source = 3;
+    string cardUrl = 4;
+    // card is the imported/manual AgentCard JSON. Write-only on create/update.
+    string card = 5;
+    string protocolVersion = 6;
+    A2AAuth auth = 7;
+    int32 timeoutSeconds = 8;
+    int32 maxConcurrentInvocations = 9;
+    string metadataJson = 10;
+    // clientConfig is the shared Kubernetes-shaped endpoint configuration. It
+    // replaces endpoint when set.
+    ClientConfig clientConfig = 11;
+}
+
+// A2AAuth is the outbound credential. Secret material is write-only.
+message A2AAuth {
+    string type = 1;
+    string apiKeyHeader = 2;
+    repeated string headerNames = 3;
+    string tokenUrl = 4;
+    string clientId = 5;
+    repeated string scopes = 6;
+    string audience = 7;
+    string clientAuth = 8;
+    bool insecureSkipVerify = 9;
+    // hasCredentials reports that the server-side Secret has the required
+    // keys. The values are never returned.
+    bool hasCredentials = 10;
+    // credential is write-only: apiKey / bearer token / headers JSON.
+    string credential = 11;
+    // clientSecret is write-only.
+    string clientSecret = 12;
+    bool clearCredentials = 13;
+}
+
+// AgentContract is the common, externally visible contract.
+message AgentContract {
+    repeated string allowedSkills = 1;
+    repeated string inputModes = 2;
+    repeated string outputModes = 3;
+}
+
+// AgentSharing controls cross-namespace use of an external agent.
+message AgentSharing {
+    repeated string allowedNamespaces = 1;
+}
+
+// AgentA2AStatus is the observed A2A state.
+message AgentA2AStatus {
+    string phase = 1;
+    string protocolVersion = 2;
+    string transport = 3;
+    string resolvedEndpoint = 4;
+    string cardVersion = 5;
+    string cardDigest = 6;
+    int64 cardFetchedAt = 7;
+    string lastSyncError = 8;
+    bool authReady = 9;
+    string provider = 10;
+    A2ACapabilities capabilities = 11;
+    repeated string inputModes = 12;
+    repeated string outputModes = 13;
+    repeated A2ASkill skills = 14;
+    string securitySchemes = 15;
+    repeated A2AExtension extensions = 16;
+    // card is the last good raw AgentCard JSON.
+    string card = 17;
+    repeated A2ACardSnapshot cardHistory = 18;
+    string observedRefreshToken = 19;
+}
+
+message A2ASkill {
+    string id = 1;
+    string name = 2;
+    string description = 3;
+    repeated string tags = 4;
+    repeated string examples = 5;
+    repeated string inputModes = 6;
+    repeated string outputModes = 7;
+}
+
+message A2ACapabilities {
+    bool streaming = 1;
+    bool pushNotifications = 2;
+    bool extendedAgentCard = 3;
+    bool stateTransitionHistory = 4;
+}
+
+message A2AExtension {
+    string uri = 1;
+    string description = 2;
+    bool required = 3;
+}
+
+message A2ACardSnapshot {
+    string version = 1;
+    string digest = 2;
+    int64 fetchedAt = 3;
+    int32 skillCount = 4;
+    int32 interfaceCount = 5;
+}
+
+// PreviewAgentA2ARequest asks the server to fetch/parse a card without
+// persisting anything.
+message PreviewAgentA2ARequest {
+    string namespace = 1;
+    string kind = 2;
+    AgentExecution execution = 3;
+}
+
+message PreviewAgentA2AResponse {
+    bool ok = 1;
+    string message = 2;
+    int64 latencyMs = 3;
+    string effectiveCardUrl = 4;
+    AgentA2AStatus summary = 5;
+    string rawCard = 6;
+    repeated string warnings = 7;
+}
+
+// InvokeAgentA2ARequest is one message to an external A2A agent.
+message InvokeAgentA2ARequest {
+    // @gotags: uri:"name"
+    string name = 1;
+    string message = 2;
+    string contextId = 3;
+    string taskId = 4;
+    string skill = 5;
+    string metadataJson = 6;
+    int32 timeoutSeconds = 7;
+    string requestId = 8;
+}
+
+message A2AArtifact {
+    string artifactId = 1;
+    string name = 2;
+    string description = 3;
+    repeated A2APart parts = 4;
+}
+
+message A2APart {
+    // kind is text, data or file.
+    string kind = 1;
+    string text = 2;
+    string data = 3;
+    string fileUrl = 4;
+    string fileName = 5;
+    string mimeType = 6;
+}
+
+message A2AInterrupt {
+    // kind is input-required or auth-required.
+    string kind = 1;
+    string requestId = 2;
+    string message = 3;
+    repeated string schemes = 4;
+}
+
+message InvokeAgentA2AResponse {
+    string invocationId = 1;
+    string taskId = 2;
+    string contextId = 3;
+    string state = 4;
+    string text = 5;
+    repeated A2AArtifact artifacts = 6;
+    A2AInterrupt interrupt = 7;
+    int64 latencyMs = 8;
+    bool retryable = 9;
+    string error = 10;
+    string rawTask = 11;
+}
+
+message ListAgentA2AInvocationRequest {
+    // @gotags: uri:"name" form:"-"
+    string name = 1;
+    // @gotags: form:"offset"
+    int32 offset = 2;
+    // @gotags: form:"limit"
+    int32 limit = 3;
+    // @gotags: form:"state"
+    string state = 4;
+    // @gotags: form:"source"
+    string source = 5;
+    // @gotags: form:"taskId"
+    string taskId = 6;
+}
+
+message A2AInvocation {
+    string invocationId = 1;
+    string agent = 2;
+    string namespace = 3;
+    string agentKind = 4;
+    string source = 5;
+    string callerKind = 6;
+    string callerId = 7;
+    string callerName = 8;
+    string callerAgent = 9;
+    string parentRunId = 10;
+    string taskId = 11;
+    string contextId = 12;
+    string state = 13;
+    string method = 14;
+    string transport = 15;
+    string authType = 16;
+    string input = 17;
+    string output = 18;
+    string error = 19;
+    int64 latencyMs = 20;
+    string cardVersion = 21;
+    string cardDigest = 22;
+    int32 artifactCount = 23;
+    string artifacts = 24;
+    string events = 25;
+    bool truncated = 26;
+    string requestId = 27;
+    int64 createdAt = 28;
+    int64 completedAt = 29;
+}
+
+message ListAgentA2AInvocationResponse {
+    repeated A2AInvocation invocations = 1;
+    int64 count = 2;
+}
+
+message GetAgentA2AInvocationRequest {
+    // @gotags: uri:"name"
+    string name = 1;
+    // @gotags: uri:"invocationId"
+    string invocationId = 2;
+}
+
+message GetAgentA2AInvocationResponse {
+    A2AInvocation invocation = 1;
+}

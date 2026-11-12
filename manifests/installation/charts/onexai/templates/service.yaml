@@ -1,0 +1,32 @@
+{{- /*
+每服务一个 Service。type/ports 全部来自 values。
+80 与 443 都指向**明文**业务端口——这套服务没有任何 TLS 端点，443 只是满足
+「每个 Service 暴露 80/443」的要求，不是 TLS 终止。
+*/ -}}
+{{- range $svc := (include "onexai.serviceNames" . | splitList " ") }}
+{{- $s := index $.Values.services $svc }}
+{{- /* A worker (the job controller) serves no traffic and has no Service. */}}
+{{- if $s.service }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $svc }}
+  labels:
+    app: {{ $svc }}
+    {{- include "onexai.labels" $ | nindent 4 }}
+spec:
+  type: {{ $s.service.type }}
+  selector:
+    app: {{ $svc }}
+  ports:
+    {{- range $p := $s.service.ports }}
+    - name: {{ $p.name }}
+      port: {{ $p.port }}
+      protocol: TCP
+      targetPort: {{ $p.targetPort }}
+    {{- end }}
+  internalTrafficPolicy: Cluster
+  sessionAffinity: None
+{{- end }}
+{{- end }}

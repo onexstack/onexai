@@ -1,0 +1,16 @@
+apiVersion: v2
+name: onexai
+description: >-
+  OneXAI 三个服务（oai-agent-apiserver、oai-chat-apiserver、onexai(MCP)）的 Helm Chart。
+  配置由内嵌的 files/<svc>.yaml 渲染成**每服务一个 Secret**（不是 ConfigMap：这几份配置
+  里嵌着 coredb 口令、LLM key、飞书 secret，以及一个列表内的 chat.internal-credentials，
+  而后者无法用环境变量覆盖）。
+type: application
+version: 0.1.0
+# 与 onex chart 同一约定：刻意不是 latest。部署 job 用 --set global.image.tag=<tag>
+# 覆盖它；留默认会以 ImagePullBackOff 大声失败，而不是静默地跑旧镜像。
+appVersion: "v0.0.0"
+keywords:
+  - onexai
+  - apiserver
+  - mcp

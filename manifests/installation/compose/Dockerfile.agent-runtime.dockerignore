@@ -1,0 +1,17 @@
+# BuildKit-specific ignore file for manifests/installation/compose/Dockerfile.agent-runtime.
+# Keep in sync with Dockerfile.dockerignore.
+
+_output
+mcpctl
+pg2crd
+oai-scheduledrun-migrator
+
+.git
+.github
+docs
+manifests
+examples
+tmp
+temp
+test-results
+*.md

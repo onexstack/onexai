@@ -1,0 +1,62 @@
+# oai-controller-manager for the compose stack.
+#
+# This file is decoded by the Kubernetes component-config machinery: keys are
+# camelCase and an unknown key is a startup error. The service does not use
+# environment variables.
+
+apiVersion: onexcontrollermanager.config.onexai.io/v1beta1
+kind: OneXControllerManagerConfiguration
+
+generic:
+  leaderElection:
+    leaderElect: false
+    leaseDuration: 15s
+    renewDeadline: 10s
+    resourceLock: leases
+    resourceName: oai-controller-manager
+    resourceNamespace: kube-system
+    retryPeriod: 2s
+  bindAddress: 0.0.0.0
+  healthzBindAddress: 0.0.0.0:20250
+  metricsBindAddress: 0.0.0.0:20251
+  controllers:
+    - '*'
+  parallelism: 16
+  syncPeriod: 10h0m0s
+
+# The resource mirror is off, so no database is opened here.
+coredb:
+  dialect: postgres
+  addr: ""
+  username: ""
+  password: ""
+  database: onex
+  maxOpenConnections: 20
+  logLevel: 1
+
+mirror:
+  enabled: false
+  schema: mirror
+  kinds: []
+  batchSize: 500
+  flushInterval: 50ms
+  sweepInterval: 5m
+
+garbageCollectorController:
+  enableGarbageCollector: true
+  concurrentGCSyncs: 20
+  gcIgnoredResources:
+    - resource: events
+    - group: events.k8s.io
+      resource: events
+
+# Empty means only an Agent's own modelRef selects an aggregation endpoint.
+promptAggregation:
+  model: ""
+  maxTokens: 4000
+  maxInputTokens: 60000
+  timeout: 60s
+  # Must match oai-agent-apiserver's model.api-key-encryption-key. It opens the
+  # enc:v1: value the API stores in a Model's credential Secret. Empty leaves
+  # only legacy plaintext credentials usable.
+  modelAPIKeyEncryptionKey: ""

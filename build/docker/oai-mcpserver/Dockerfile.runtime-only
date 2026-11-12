@@ -1,0 +1,63 @@
+# syntax=docker/dockerfile:1.7
+
+# =============================================================================
+# 0) Global Arguments (Must precede the first FROM instruction)
+# =============================================================================
+ARG ENV=prod
+
+# =============================================================================
+# 1) Base Images Preparation (Pre-defined base environments)
+# =============================================================================
+ARG UID=65532
+ARG GID=65532
+ARG USER=noroot
+
+# --- A. Debian Base Prep (Includes tool installation and user creation) ---
+FROM debian:bookworm AS base-debian-prep
+ARG UID
+ARG GID
+ARG USER
+# Install runtime dependencies
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates tzdata wget curl telnet \
+ && rm -rf /var/lib/apt/lists/*
+# Create non-root user
+RUN groupadd -g ${GID} ${USER} 2>/dev/null || true \
+ && useradd -u ${UID} -g ${USER} ${USER} 2>/dev/null || true
+
+# --- B. Distroless Base Prep (Direct reference) ---
+FROM gcr.io/distroless/base-debian12:nonroot AS base-distroless-prep
+
+# =============================================================================
+# 2) Selection Logic (Dynamic selection based on DistrolessMode and ENV)
+# =============================================================================
+# Current Mode: auto
+# [Mode: auto] Dynamic selection based on build argument ENV (Default is prod)
+# Define Routing Table
+FROM base-distroless-prep AS mode-auto-prod
+FROM base-debian-prep     AS mode-auto-test
+FROM base-debian-prep     AS mode-auto-dev
+
+# Dynamic selection
+FROM mode-auto-${ENV} AS final-base
+
+# =============================================================================
+# 3) Runtime Stage (Final runtime)
+# =============================================================================
+FROM final-base AS runtime
+
+ARG OS=linux
+ARG ARCH=amd64
+ARG UID
+ARG GID
+
+WORKDIR /app
+
+# Copy artifact (Copy from external build output directory)
+# Note: Assumes the external path structure is _output/platforms/${OS}/${ARCH}/...
+COPY --chown=${UID}:${GID} _output/platforms/${OS}/${ARCH}/oai-mcpserver /app/oai-mcpserver
+
+# Security: run as non-root (UID is 65532 for both distroless and debian)
+USER ${UID}:${GID}
+
+ENTRYPOINT ["/app/oai-mcpserver"]

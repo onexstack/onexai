@@ -1,0 +1,362 @@
+// Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// This file defines the messages for long-term memory management.
+//
+syntax = "proto3";
+
+package agent.v1;
+
+option go_package = "github.com/onexstack/onexai/pkg/api/agent/v1;v1";
+
+// Memory is one declarative long-term memory space.
+message Memory {
+    string name = 1;
+    string displayName = 2;
+    string description = 3;
+    string status = 4;
+    bool enabled = 5;
+    string namespace = 6;
+
+    string embeddingModel = 7;
+    int32 embeddingDimensions = 8;
+    string embeddingVersion = 9;
+
+    bool extractionEnabled = 10;
+    string extractionModel = 11;
+    int32 maxFactsPerRun = 12;
+
+    int32 ttlDays = 13;
+    int32 maxEntriesPerSubject = 14;
+
+    string retrievalMode = 15;
+    int32 topK = 16;
+    double minScore = 17;
+    int32 maxTokens = 18;
+
+    bool piiRedactionEnabled = 19;
+    string piiStrategy = 20;
+    bool blockInstructionLike = 21;
+    bool allowAdminContentRead = 22;
+
+    string subjectMode = 23;
+    string owner = 24;
+    map<string, string> labels = 25;
+    int64 createdAt = 26;
+    int64 updatedAt = 27;
+    string phase = 28;
+    // entryCount and subjectCount are computed from the entry table on read.
+    int64 entryCount = 29;
+    int64 subjectCount = 30;
+}
+
+message CreateMemoryRequest { Memory memory = 1; }
+message CreateMemoryResponse { Memory memory = 1; }
+message UpdateMemoryRequest { Memory memory = 1; }
+message UpdateMemoryResponse { Memory memory = 1; }
+message GetMemoryRequest {
+    // @gotags: uri:"memory"
+    string name = 1;
+}
+message GetMemoryResponse { Memory memory = 1; }
+message DeleteMemoryRequest {
+    // @gotags: uri:"memory"
+    string name = 1;
+}
+message DeleteMemoryResponse {}
+
+message ListMemoryRequest {
+    // @gotags: form:"offset"
+    int32 offset = 1;
+    // @gotags: form:"limit"
+    int32 limit = 2;
+    // @gotags: form:"namespace"
+    string namespace = 3;
+}
+message ListMemoryResponse {
+    repeated Memory memories = 1;
+    int64 count = 2;
+}
+
+// MemoryEntry is one stored memory.
+message MemoryEntry {
+    string id = 1;
+    string namespace = 2;
+    string memory = 3;
+    string agent = 4;
+    string subject = 5;
+    string sessionId = 6;
+    string runId = 7;
+    string type = 8;
+    string status = 9;
+    string content = 10;
+    string embeddingModel = 11;
+    string embeddingVersion = 12;
+    string embeddingStatus = 13;
+    string source = 14;
+    string actor = 15;
+    float importance = 16;
+    float confidence = 17;
+    int64 accessCount = 18;
+    int64 lastAccessedAt = 19;
+    int64 expiresAt = 20;
+    repeated string tags = 21;
+    // metadata is a JSON object string.
+    string metadata = 22;
+    int64 version = 23;
+    int64 createdAt = 24;
+    int64 updatedAt = 25;
+    // agentNamespace is where the writing agent lives. It is not the Memory's
+    // namespace: a shared Memory is written in place, and two namespaces may
+    // hold an agent with the same name.
+    string agentNamespace = 26;
+}
+
+message CreateMemoryEntryRequest {
+    string memory = 1;
+    MemoryEntry entry = 2;
+}
+message CreateMemoryEntryResponse { MemoryEntry entry = 1; }
+
+message GetMemoryEntryRequest {
+    // @gotags: uri:"memory"
+    string memory = 1;
+    // @gotags: uri:"id"
+    string id = 2;
+    string subject = 3;
+}
+message GetMemoryEntryResponse { MemoryEntry entry = 1; }
+
+message UpdateMemoryEntryRequest {
+    string memory = 1;
+    string id = 2;
+    MemoryEntry entry = 3;
+    // version is the expected entry version for optimistic concurrency.
+    int64 version = 4;
+    string subject = 5;
+}
+message UpdateMemoryEntryResponse { MemoryEntry entry = 1; }
+
+message DeleteMemoryEntryRequest {
+    // @gotags: uri:"memory"
+    string memory = 1;
+    // @gotags: uri:"id"
+    string id = 2;
+    string subject = 3;
+}
+message DeleteMemoryEntryResponse {}
+
+message ListMemoryEntriesRequest {
+    // @gotags: form:"memory"
+    string memory = 1;
+    // @gotags: form:"agent"
+    string agent = 2;
+    // @gotags: form:"subject"
+    string subject = 3;
+    // @gotags: form:"type"
+    string type = 4;
+    // @gotags: form:"status"
+    string status = 5;
+    // @gotags: form:"source"
+    string source = 6;
+    // @gotags: form:"q"
+    string q = 7;
+    // @gotags: form:"sessionId"
+    string sessionId = 8;
+    // @gotags: form:"runId"
+    string runId = 9;
+    // @gotags: form:"tag"
+    string tag = 10;
+    // @gotags: form:"offset"
+    int32 offset = 11;
+    // @gotags: form:"limit"
+    int32 limit = 12;
+    // @gotags: form:"sort"
+    string sort = 13;
+}
+message ListMemoryEntriesResponse {
+    repeated MemoryEntry entries = 1;
+    int64 count = 2;
+}
+
+message SearchMemoryEntriesRequest {
+    string memory = 1;
+    string query = 2;
+    string mode = 3;
+    string agent = 4;
+    string subject = 5;
+    repeated string types = 6;
+    repeated string tags = 7;
+    int32 topK = 8;
+    double minScore = 9;
+    int32 maxTokens = 10;
+    bool explain = 11;
+    bool persist = 12;
+}
+
+message MemoryScoreBreakdown {
+    double final = 1;
+    double rrf = 2;
+    double vectorSimilarity = 3;
+    int32 vectorRank = 4;
+    int32 keywordRank = 5;
+    double recency = 6;
+    double importance = 7;
+    double confidence = 8;
+}
+
+message MemorySearchHit {
+    MemoryEntry entry = 1;
+    double score = 2;
+    MemoryScoreBreakdown breakdown = 3;
+    int32 tokenCount = 4;
+}
+
+message SearchMemoryEntriesResponse {
+    repeated MemorySearchHit hits = 1;
+    int32 vectorCandidates = 2;
+    int32 keywordCandidates = 3;
+    int64 tookMs = 4;
+    int32 tokenCount = 5;
+    bool degraded = 6;
+}
+
+message BatchDeleteMemoryEntriesRequest {
+    string memory = 1;
+    repeated string ids = 2;
+    string subject = 3;
+}
+message BatchDeleteMemoryEntriesResult {
+    string id = 1;
+    bool ok = 2;
+    string reason = 3;
+}
+message BatchDeleteMemoryEntriesResponse {
+    repeated BatchDeleteMemoryEntriesResult results = 1;
+}
+
+message MemoryStats {
+    int64 total = 1;
+    map<string, int64> byType = 2;
+    map<string, int64> byStatus = 3;
+    int64 pendingEmbeddings = 4;
+    int64 failedEmbeddings = 5;
+    int64 subjects = 6;
+}
+message GetMemoryStatsRequest {
+    string memory = 1;
+    string agent = 2;
+    // @gotags: form:"subject"
+    string subject = 3;
+}
+message GetMemoryStatsResponse { MemoryStats stats = 1; }
+
+message MemorySubject {
+    string subject = 1;
+    int64 entries = 2;
+    int64 lastCreatedAt = 3;
+}
+message ListMemorySubjectsRequest {
+    string memory = 1;
+    string agent = 2;
+    // @gotags: form:"q"
+    string q = 3;
+    // @gotags: form:"offset"
+    int32 offset = 4;
+    // @gotags: form:"limit"
+    int32 limit = 5;
+}
+message ListMemorySubjectsResponse {
+    repeated MemorySubject subjects = 1;
+    int64 count = 2;
+}
+
+message PurgeMemorySubjectRequest {
+    // @gotags: uri:"memory"
+    string memory = 1;
+    // @gotags: uri:"subject"
+    string subject = 2;
+    // actor is the operator; the handler fills it from the bearer claims.
+    string actor = 3;
+}
+message PurgeMemorySubjectResponse { int64 deleted = 1; }
+
+// MemoryAudit is one append-only mutation event.
+message MemoryAudit {
+    string id = 1;
+    string memory = 2;
+    string subject = 3;
+    string entryId = 4;
+    string actor = 5;
+    string action = 6;
+    string source = 7;
+    string reason = 8;
+    int64 createdAt = 9;
+}
+
+message ListMemoryAuditRequest {
+    string memory = 1;
+    // @gotags: form:"subject"
+    string subject = 2;
+    // @gotags: form:"action"
+    string action = 3;
+    // @gotags: form:"offset"
+    int32 offset = 4;
+    // @gotags: form:"limit"
+    int32 limit = 5;
+}
+message ListMemoryAuditResponse {
+    repeated MemoryAudit audits = 1;
+    int64 count = 2;
+}
+
+message ReembedMemoryRequest {
+    string memory = 1;
+    bool dryRun = 2;
+    int32 limit = 3;
+}
+message ReembedMemoryResponse {
+    int64 scanned = 1;
+    int64 updated = 2;
+    int64 failed = 3;
+    int64 remaining = 4;
+}
+
+message MemoryEvalCase {
+    string query = 1;
+    repeated string expectedIds = 2;
+}
+message EvalMemoryRequest {
+    // @gotags: uri:"memory"
+    string memory = 1;
+    repeated MemoryEvalCase cases = 2;
+    int32 topK = 3;
+    string mode = 4;
+    string subject = 5;
+    string agent = 6;
+}
+message MemoryEvalCaseResult {
+    string query = 1;
+    double precision = 2;
+    double recall = 3;
+    double mrr = 4;
+    repeated string retrievedIds = 5;
+    repeated string missingIds = 6;
+}
+message EvalMemoryResponse {
+    repeated MemoryEvalCaseResult cases = 1;
+    double precision = 2;
+    double recall = 3;
+    double mrr = 4;
+}

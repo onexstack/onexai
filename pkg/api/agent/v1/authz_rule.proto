@@ -1,0 +1,126 @@
+// Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// This file defines the Protobuf messages for managing authorization rules.
+//
+syntax = "proto3"; // Specifies the syntax version used in this file.
+
+package agent.v1;
+
+option go_package = "github.com/onexstack/onexai/pkg/api/agent/v1;v1";
+
+// AuthzSubject is one principal a policy names.
+message AuthzSubject {
+    string kind = 1;      // "User" | "Group" | "ServiceAccount" (case-insensitive)
+    string name = 2;      // account id / login name / Lark id / group name
+    string namespace = 3; // ServiceAccount only
+}
+
+// AuthzResource is one resource target of a policy.
+message AuthzResource {
+    string kind = 1;           // "agent" | "mcp" | ... | "*"
+    repeated string names = 2; // ["*"] means every resource of that kind
+}
+
+// AuthzRule is one policy evaluated by the OPA policy at
+// internal/pkg/authz/opa/policy/authz.rego. The policy matches a request against
+// every rule and combines the results (deny wins, otherwise any allow).
+//
+// # Two shapes, one statement
+//
+// subjectType/subjectIds and subjects are two spellings of the same principal
+// set; the same is true of resourceKind/resourceNames and resources. The plural
+// shapes can express a policy that names a user and a group, or a namespace and
+// an agent, in one object. Writers may send either; readers receive both, with
+// the singular fields populated whenever the plural set happens to be
+// representable in the old shape.
+message AuthzRule {
+    string name = 1;                  // Rule identifier, e.g. "rule-001" — unique, used for audit.
+    // ── Legacy single-subject shape, kept readable and writable ──
+    string subjectType = 2;           // "user" | "group" | "serviceaccount" | "namespace" | "*"
+    repeated string subjectIds = 3;    // UserID / GroupCode / ServiceName / Namespace list; ["*"] means any subject
+    // ── Legacy single-resource shape, kept readable and writable ──
+    // resourceKind: "agent" | "mcp" | "tool" | "skill" | "knowledgebase" |
+    // "namespace" | "service" | "cluster" | "k8s-namespace" | "role" | "*".
+    // The legacy spelling "workspace" is still accepted.
+    string resourceKind = 4;
+    repeated string resourceNames = 5; // Resource name list; ["*"] means any resource of that kind
+    string resourceAttributes = 6;    // JSON object filter, e.g. {"env":"test"}; empty means no attribute filter
+    // agentNames scopes the grant to particular Agents. **Empty means the rule
+    // is not agent-scoped** and answers for whatever Agent asked — the
+    // behaviour every rule had before this field existed, so rows predating it
+    // keep their meaning. It is matched against the requesting Agent's name.
+    repeated string agentNames = 14;
+    repeated string verbs = 7;        // "read" / "write"; write does NOT imply read
+    string effect = 8;                // "allow" | "deny"
+    string status = 9;                // "enabled" | "disabled"
+    string description = 10;
+    string owner = 11;
+    int64 createdAt = 12;             // unix milliseconds
+    int64 updatedAt = 13;             // unix milliseconds
+    // ── Multi-principal / multi-resource shapes ──
+    // subjectNamespace is the Namespace -> Group -> User inheritance target.
+    string subjectNamespace = 15;
+    repeated AuthzSubject subjects = 16;
+    repeated AuthzResource resources = 17;
+}
+
+message CreateAuthzRuleRequest { AuthzRule authzRule = 1; }
+message CreateAuthzRuleResponse { AuthzRule authzRule = 1; }
+message UpdateAuthzRuleRequest { AuthzRule authzRule = 1; }
+message UpdateAuthzRuleResponse { AuthzRule authzRule = 1; }
+message DeleteAuthzRuleRequest {
+    // @gotags: uri:"name"
+    string name = 1;
+}
+message DeleteAuthzRuleResponse {}
+message GetAuthzRuleRequest {
+    // @gotags: uri:"name"
+    string name = 1;
+}
+message GetAuthzRuleResponse { AuthzRule authzRule = 1; }
+message ListAuthzRuleRequest {
+    // offset is how many records to skip before the page. It is ignored when
+    // limit is zero, because that request asks for the whole list.
+    // @gotags: form:"offset"
+    int32 offset = 1;
+
+    // limit caps how many records the page holds. Zero means no limit, which is
+    // what this endpoint returned before it supported paging.
+    // @gotags: form:"limit"
+    int32 limit = 2;
+
+    // The filters below are ANDed. They exist so the console can ask "which
+    // policies name this user/group/namespace" without downloading the whole
+    // rule set and scanning it in the browser.
+
+    // @gotags: form:"subjectId"
+    string subjectId = 3;
+    // @gotags: form:"subjectType"
+    string subjectType = 4;   // User | Group | ServiceAccount | namespace | * (case-insensitive)
+    // @gotags: form:"resourceKind"
+    string resourceKind = 5;
+    // @gotags: form:"resourceName"
+    string resourceName = 6;
+    // @gotags: form:"effect"
+    string effect = 7;        // allow | deny
+    // @gotags: form:"enabled"
+    string enabled = 8;       // "true" | "false"; empty means no filter
+}
+message ListAuthzRuleResponse {
+    repeated AuthzRule authzRules = 1;
+
+    // count is the total number of authorization rules, independent of the page returned.
+    int64 count = 2;
+}

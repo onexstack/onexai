@@ -1,0 +1,149 @@
+# oai-agent-apiserver for the compose stack.
+#
+# Non-secret values live here. Secrets and the LLM endpoint are supplied by the
+# environment (see manifests/installation/compose/env.example), which takes precedence over this
+# file. A complete replacement can be mounted by setting AGENT_CONFIG_FILE.
+
+insecure:
+  addr: ":8080"
+
+coredb:
+  dialect: postgres
+  addr: postgres:5432
+  username: onexai
+  # Supplied through OAI_AGENT_APISERVER_COREDB_PASSWORD.
+  password: ""
+  database: onexai
+  sslmode: disable
+  log-level: 0
+
+# Required by the option validation. Neither endpoint is contacted at startup;
+# the fake/oss clients are placeholders in this deployment.
+fake:
+  endpoint: http://127.0.0.1:9999
+  user-agent: oai-agent-apiserver
+  debug: false
+  timeout: 30s
+
+oss:
+  endpoint: http://127.0.0.1:9999
+  user-agent: oai-agent-apiserver
+  debug: false
+  timeout: 30s
+
+auth:
+  anonymous-auth: false
+  authorization-mode: ""
+  control-token: ""
+  # TokenReview / SubjectAccessReview 原生评审端点的调用方 Bearer Token。
+  # 留空 = 端点返回 503；控制台 /v1 评审走登录 JWT，不受此项影响。
+  webhook-token: ""
+  # Kubernetes 结构化认证配置路径；留空表示只使用平台 HS256 令牌。
+  authentication-config: ""
+  # Development default. The secure profile sets this to false and seeds the
+  # AK/SK rows that oai-chat-apiserver and oai-job-controller sign with.
+  bypass-aksk: true
+
+# OPA authorization is enabled by default. With no AuthorizationRule objects
+# every named-agent run is denied, which looks like a broken deployment. The
+# development profile turns it off; the secure profile seeds rules instead.
+authz:
+  enabled: false
+  # Path to an apiserver.config.k8s.io/v1 AuthorizationConfiguration. When set,
+  # its webhook authorizers replace authz.webhook.endpoints.
+  authorization-config: ""
+
+jwt:
+  # Supplied through OAI_AGENT_APISERVER_JWT_KEY. Must match the chat service.
+  key: ""
+  expired: "24h"
+
+lark:
+  app-id: ""
+  app-secret: ""
+
+llm:
+  # Supplied through OAI_AGENT_APISERVER_LLM_BASE_URL / _API_KEY / _MODEL.
+  # base-url must be non-empty or every run fails with "AI engine is not
+  # configured", even when an Agent names a Model object.
+  base-url: ""
+  api-key: ""
+  model: "gpt-4o-mini"
+  max-tokens: 8192
+  allow-private-endpoints: false
+  test-timeout: "15s"
+
+model:
+  api-key-encryption-key: ""
+
+agent:
+  # Empty disables the skill checkout and the sandboxed shell/filesystem tools.
+  skills-dir: ""
+  engine: "eino"
+  runtime:
+    port-enabled: false
+    default-profile: ""
+    internal-addr: "127.0.0.1:8091"
+    token-key: ""
+  delegation:
+    max-depth: 3
+  sandbox:
+    enabled: false
+  chat-model: ""
+  fallback-model: ""
+  max-retries: 2
+  retry-backoff: "500ms"
+  max-concurrent-per-conversation: 3
+  run-timeout: "5m"
+  session-idle-ttl: "168h"
+  session-idle-sweep: "1m"
+  tool-timeout: "2m"
+  mcp-enabled: true
+  mcp-discovery-timeout: "15s"
+  mcp-cache-ttl: "5m"
+  checkpoint-ttl: "24h"
+  compat-approval-mode: "deny"
+  require-approval: []
+  max-context-tokens: 500000
+  context-preserve-tokens: 0
+  max-tool-output-chars: 16000
+  max-output-tokens:
+    default: 8192
+    lark: 2048
+    onex: 16384
+
+store:
+  source: "sql"
+  refresh-interval: "5m"
+  read-backend: controlplane
+  read-backends: {}
+  mirror:
+    schema: mirror
+    max-lag: "10m"
+    count-mode: exact
+  get-cache-size: 10000
+
+redis:
+  addr: "redis:6379"
+  username: ""
+  password: ""
+  database: 0
+  dial-timeout: 2s
+  read-timeout: 1s
+  write-timeout: 1s
+  max-retries: 1
+  key-prefix: "onexai"
+  session-ttl: "24h"
+
+media:
+  driver: local
+  data-dir: /data/media
+  retention: "0s"
+  gc-enabled: false
+
+controlplane:
+  kubeconfig: /etc/onexai/declserver.kubeconfig
+  namespace: ""
+  settings-configmap: ""
+  sync-timeout: 30s
+  resync-period: 60s

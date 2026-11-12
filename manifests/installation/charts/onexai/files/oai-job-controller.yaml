@@ -1,0 +1,31 @@
+# oai-job-controller — batch.onexai.io Job/CronJob controller.
+#
+# It reads and writes the declarative control plane (oai-declserver) and submits
+# agent runs to oai-agent-apiserver. It serves no business traffic, so it has no
+# Service: only health and metrics ports.
+
+kubeconfig: /etc/onexai/controlplane/kubeconfig
+
+agent:
+  # The provider submits an asynchronous run; this timeout bounds one HTTP call,
+  # not one agent run.
+  endpoint: {{ .Values.config.agentEndpoint }}
+  timeout: "30s"
+
+agent-aksk:
+  api-key: {{ .Values.config.agentAkskApiKey }}
+  secret-key: "{{ .Values.config.agentAkskSecretKey }}"
+
+# Empty means every provider type. Deploy one instance per type when a provider
+# needs isolated credentials or scaling.
+job-types: []
+
+provider-poll-interval: "2s"
+max-concurrent-reconciles: 20
+
+leader-elect: true
+leader-election-id: "oai-job-controller"
+leader-election-namespace: ""
+
+metrics-addr: ":8080"
+health-probe-addr: ":8081"

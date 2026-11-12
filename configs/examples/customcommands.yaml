@@ -1,0 +1,162 @@
+# CustomCommand 示例。
+#
+# 这些资源只做参考，不绑定 Agent，因此不会出现在飞书的 /help 里。它们同时是
+# 控制台「自定义命令」表单 prompt / http / tool 输入框示例的来源。
+#
+# 注意：CRD 使用 default / enum / schema；控制台 JSON 表单使用
+# defaultValue / enums / schemaJson。两者不要混写。
+apiVersion: agent.onexai.io/v1alpha1
+kind: CustomCommand
+metadata:
+  name: hello
+  namespace: helper-public
+  labels:
+    env: test
+spec:
+  enabled: true
+  displayName: hello
+  description: hello user
+  type: prompt
+  aliases: [hl]
+  usage: "<name>"
+  timeoutSeconds: 60
+  parameters:
+    - name: name
+      in: positional
+      type: string
+      required: true
+      description: 被问候的人名
+  prompt:
+    template: "请输出: 你好 {{.Params.name}} 同志"
+---
+apiVersion: agent.onexai.io/v1alpha1
+kind: CustomCommand
+metadata:
+  name: example-prompt
+  namespace: helper-public
+spec:
+  enabled: true
+  displayName: 发布说明示例（prompt）
+  description: 演示位置参数、枚举、数组、布尔、if/range、.User 与 .Now
+  type: prompt
+  usage: "<service> [--env=<env>] [--changes=<changes>,...] [--formal]"
+  parameters:
+    - name: service
+      in: positional
+      type: string
+      required: true
+      description: 服务名
+    - name: env
+      type: string
+      enum: [dev, staging, prod]
+      default: prod
+      description: 部署环境
+    - name: changes
+      type: array
+      description: 变更条目
+    - name: formal
+      type: boolean
+      short: f
+      description: 是否使用正式语气
+  prompt:
+    template: |
+      发布说明（{{.Command}}）
+      环境: {{.Params.env}}
+      服务: {{.Params.service}}
+      生成时间: {{.Now.Format "2006-01-02 15:04:05"}}
+      操作人: {{if .User}}{{.User.Username}}{{else}}未知{{end}}
+      {{if .Params.formal}}语气: 正式{{else}}语气: 简洁{{end}}
+
+      变更:
+      {{range .Params.changes}}- {{.}}
+      {{end}}
+---
+apiVersion: agent.onexai.io/v1alpha1
+kind: CustomCommand
+metadata:
+  name: example-http
+  namespace: helper-public
+spec:
+  enabled: true
+  displayName: GitHub Issue 查询示例（http）
+  description: 演示 url/headers/query/body/sideEffects 与 output 模板
+  type: http
+  usage: "<owner> <repo> <number> [--state=<state>]"
+  timeoutSeconds: 30
+  parameters:
+    - name: owner
+      in: positional
+      type: string
+      required: true
+    - name: repo
+      in: positional
+      type: string
+      required: true
+    - name: number
+      in: positional
+      type: integer
+      required: true
+    - name: state
+      type: string
+      enum: [OPEN, CLOSED]
+      default: OPEN
+  http:
+    method: POST
+    url: "https://api.github.com/graphql"
+    headers:
+      - name: Accept
+        value: application/vnd.github+json
+      - name: User-Agent
+        value: onexai-custom-command
+      - name: X-GitHub-Api-Version
+        value: "2022-11-28"
+    query:
+      # GraphQL 会忽略未知 query 参数；这里只为演示 query 的模板渲染位置。
+      client: onexai
+    body: |
+      {"query":"query($owner:String!,$repo:String!,$number:Int!,$state:[IssueState!]){repository(owner:$owner,name:$repo){issue(number:$number){number title state url}}}","variables":{"owner":"{{.Params.owner}}","repo":"{{.Params.repo}}","number":{{.Params.number}},"state":["{{.Params.state}}"]}}
+    contentType: application/json
+    sideEffects: None
+  output:
+    format: template
+    template: |
+      HTTP {{.Status}}
+      {{.JSON.data.repository.issue.number}} {{.JSON.data.repository.issue.title}}
+      {{.JSON.data.repository.issue.url}}
+---
+apiVersion: agent.onexai.io/v1alpha1
+kind: CustomCommand
+metadata:
+  name: example-tool
+  namespace: helper-public
+spec:
+  enabled: true
+  displayName: 系统负载示例（tool）
+  description: 调用 helper-public/onexai MCP 的 sysload
+  type: tool
+  usage: "<top> [--output=<output>] [--wide]"
+  parameters:
+    - name: top
+      in: positional
+      type: integer
+      required: true
+      description: 显示前 N 个进程
+    - name: output
+      type: string
+      enum: [table, json]
+      default: table
+      description: 输出格式
+    - name: wide
+      type: boolean
+      description: 宽输出
+  tool:
+    mcpServer:
+      name: onexai
+      namespace: helper-public
+    tool: sysload
+    argumentsTemplate: |
+      {
+        "top": {{.Params.top}},
+        "output": "{{.Params.output}}",
+        "wide": {{.Params.wide}}
+      }

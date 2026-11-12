@@ -1,0 +1,11 @@
+OneXAI 已部署到命名空间 {{ .Release.Namespace }}（release {{ .Release.Name }}）。
+
+服务（集群内访问，端口一律用 Service 名 + 80）：
+{{- range $svc := (include "onexai.serviceNames" . | splitList " ") }}
+  http://{{ $svc }}.{{ $.Release.Namespace }}.svc.cluster.local/healthz
+{{- end }}
+
+onexai(MCP) 的端点是 POST /mcp（不是 /healthz，它没有那个路由，探针用 tcpSocket）。
+
+⚠️ 配置里凡是被留空的机密项，都由 -f values-secrets.yaml 提供；漏带会出现
+「口令为空」类的启动失败，而不是静默降级。

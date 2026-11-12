@@ -1,0 +1,119 @@
+// Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// This file defines the Protobuf messages for agent runs.
+//
+// A run is one turn: it is what a question becomes once it reaches the agent,
+// and it is the unit a caller reads back, replays and cancels.
+//
+syntax = "proto3"; // Specifies the syntax version used in this package.
+
+package agent.v1;
+
+option go_package = "github.com/onexstack/onexai/pkg/api/agent/v1;v1";
+
+// Run is one turn of a conversation.
+message Run {
+    string id = 1;                 // Run id; also the A2A task id for an A2A call.
+    string sessionId = 2;          // Conversation the run belongs to.
+    string revisionId = 3;         // Agent revision the run executed.
+    string subject = 4;            // Identity the run is authorized and metered as.
+    string actor = 5;              // Identity that acted, when it differs from subject.
+    string runtime = 6;            // Runtime that executed the run.
+    // taskId is the runtime's own task id. It is what a resumed or cancelled
+    // remote run is addressed by; empty for an in-process runtime.
+    string taskId = 7;
+    string requestId = 8;          // Idempotency key the run was accepted under.
+    string state = 9;              // "running" | "suspended" | "completed" | "failed" | "canceled"
+    string error = 10;             // Failure reason, when the run failed.
+    string usageJson = 11;         // Token usage as recorded, in JSON.
+    int64 version = 12;            // Optimistic-lock version of this record.
+    int64 startedAt = 13;          // unix milliseconds
+    int64 finishedAt = 14;         // unix milliseconds; zero while running
+    int64 createdAt = 15;          // unix milliseconds
+}
+
+// RunEvent is one semantic moment of a run. Token deltas are deliberately not
+// events: they are transport, not history.
+message RunEvent {
+    int64 seq = 1;                 // Position in the run, from one.
+    string type = 2;               // "tool_step" | "interrupt" | "final" | "usage" | ...
+    string payload = 3;            // JSON body, shaped by type.
+    int64 createdAt = 4;           // unix milliseconds
+}
+
+// RunApproval is one tool call waiting for — or answered by — a human.
+//
+// It is named for the run rather than "Approval" because agent.proto already
+// uses that name for the per-run approval policy, which is a different object.
+message RunApproval {
+    string id = 1;
+    string runId = 2;
+    string requestId = 3;          // Suspension the decision answers.
+    string sessionId = 4;
+    string agent = 5;
+    string tool = 6;               // Tool the model asked to run.
+    string args = 7;               // JSON arguments the model asked for.
+    string status = 8;             // "pending" | "approved" | "denied" | "expired"
+    string reason = 9;             // Why it was refused, when it was.
+    int64 expiresAt = 10;          // unix milliseconds
+    int64 createdAt = 11;          // unix milliseconds
+}
+
+message GetRunRequest {
+    // @gotags: uri:"id"
+    string id = 1;
+}
+
+message GetRunResponse {
+    Run run = 1;
+    repeated RunEvent events = 2;
+}
+
+message ListRunEventRequest {
+    string id = 1;
+    // after returns events with a sequence number greater than it, which is how
+    // a client resumes a stream it lost.
+    int64 after = 2;
+}
+
+message ListRunEventResponse {
+    repeated RunEvent events = 1;
+}
+
+message ListSessionRunRequest {
+    string id = 1;                 // Conversation id.
+    int32 limit = 2;               // Zero returns every run.
+}
+
+message ListSessionRunResponse {
+    repeated Run runs = 1;
+}
+
+message ListApprovalRequest {
+    // status filters by state; empty returns every state.
+    string status = 1;
+    int32 limit = 2;
+}
+
+message ListApprovalResponse {
+    repeated RunApproval approvals = 1;
+}
+
+message CancelRunRequest {
+    // @gotags: uri:"id"
+    string id = 1;
+}
+
+message CancelRunResponse {}

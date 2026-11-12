@@ -1,0 +1,45 @@
+-- Drop chat.session.agents: the resolved result a scheduling pass used to record.
+--
+-- Why this file exists. The column is gone from the model
+-- (internal/chat/model/session.go), and GORM's AutoMigrate only ever *adds* —
+-- it has no opinion about a column the model no longer mentions, so the physical
+-- column survives every boot until somebody drops it. Leaving it costs nothing at
+-- runtime and misleads every reader of the table, which is the whole reason this
+-- is a migration rather than a note.
+--
+-- Why the column went. It held "what the last scheduling pass resolved", and it
+-- was read back by two things that were both asking the wrong question:
+--
+--   * /chat reported it as "your agent". A resolution belongs to a **speaker**:
+--     `@peer` is one agent for whoever bound an account and another for the next
+--     person to talk, so in a group the card showed a member whichever agent the
+--     last speaker used.
+--   * the command-grant filter read it to decide which slash commands to build,
+--     with the same consequence — the menu followed the last speaker rather than
+--     the person opening it.
+--
+-- Both now resolve on demand through the scheduler (DynamicRuntime.ResolvedAgents),
+-- which costs one indexed point read of chat.peer_agent per call. The declaration
+-- (`refs`) is untouched: it is the conversation's own, and it is the only thing a
+-- session row states about agents.
+--
+-- ⚠️ Irreversible in the ordinary sense: the values are not reproduced anywhere.
+-- They are reproducible in principle (run the scheduler for the row's last
+-- speaker) and meaningless in practice (they described a moment, not a setting),
+-- which is why no backfill is offered.
+--
+-- Dialect: PostgreSQL — chat.session (dbschema splits per-service schemas on PG).
+-- On MySQL the table is onexai_chat_session and this file needs backtick quoting;
+-- do not run it there as-is.
+--
+-- Idempotent: IF EXISTS, so a second run is a no-op and so is a run against a
+-- database whose AutoMigrate never got as far as creating the column.
+--
+-- Rollback: ALTER TABLE chat.session ADD COLUMN agents TEXT NOT NULL DEFAULT '';
+-- (The column returns empty. Every reader that mattered now resolves on demand,
+-- so nothing needs it to be correct — see the reasoning above.)
+
+ALTER TABLE chat.session DROP COLUMN IF EXISTS agents;
+
+-- MySQL equivalent, for whoever runs this against that dialect instead:
+--   ALTER TABLE onexai_chat_session DROP COLUMN agents;

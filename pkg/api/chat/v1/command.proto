@@ -1,0 +1,134 @@
+// Command API definition, which includes the REST request/response messages for
+// executing and listing chat commands.
+syntax = "proto3"; // Specifies the syntax version used by this file.
+
+package chat.v1;
+
+option go_package = "github.com/onexstack/onexai/pkg/api/chat/v1;v1";
+
+// ExecCommandRequest is the request body for POST /v1/commands/exec.
+message ExecCommandRequest {
+    // command is the full command text, e.g. "/askai hello world".
+    string command = 1;
+
+    // conv_id is the optional target conversation ID.
+    string conv_id = 2;
+}
+
+// MarkdownContent holds a Markdown message with optional title and color.
+message MarkdownContent {
+    // title is the optional card title.
+    string title = 1;
+
+    // content is the Markdown body.
+    string content = 2;
+
+    // color is one of "green" | "red" | "orange".
+    string color = 3;
+}
+
+// ExecCommandResponse is the response body for command execution endpoints.
+message ExecCommandResponse {
+    // raw is the JSON-encoded raw command result.
+    string raw = 1;
+
+    // text is the plain-text command output.
+    string text = 2;
+
+    // markdown is the optional Markdown output.
+    MarkdownContent markdown = 3;
+
+    // error is why the command did not run, when it did not. A refused command
+    // and a command that ran and said nothing both produce no output, so
+    // without this the caller cannot tell "you may not run this" from "there
+    // was nothing to report".
+    string error = 4;
+}
+
+// CommandFlag describes a single command-line flag for TUI completion.
+message CommandFlag {
+    // name is the long flag name, e.g. "env".
+    string name = 1;
+
+    // shorthand is the single-char shorthand, e.g. "e" (may be empty).
+    string shorthand = 2;
+
+    // usage is the help text.
+    string usage = 3;
+}
+
+// CommandNode is one node in the serialized command tree (a command or
+// subcommand), used by the TUI for the "/" popup and TAB completion.
+message CommandNode {
+    // name is the command name.
+    string name = 1;
+
+    // short is the one-line description.
+    string short = 2;
+
+    // group is the command group label.
+    string group = 3;
+
+    // dangerous marks a command that needs confirmation before running.
+    bool dangerous = 4;
+
+    // flags are the command's non-inherited flags.
+    repeated CommandFlag flags = 5;
+
+    // subcommands are the nested subcommands.
+    repeated CommandNode subcommands = 6;
+}
+
+// ListCommandTreeResponse is the response body for GET /v1/commands/tree.
+message ListCommandTreeResponse {
+    // commands is the root list of command-tree nodes.
+    repeated CommandNode commands = 1;
+}
+
+// Command is one catalogue entry: the control-plane record of a platform
+// command compiled into the chat server. It is read-only here; the chat server
+// reconciles the objects itself.
+message Command {
+    string name = 1;
+    string namespace = 2;
+    string displayName = 3;
+    string description = 4;
+    bool enabled = 5;
+    string group = 6;
+    repeated string aliases = 7;
+    string usage = 8;
+    string source = 9;
+    bool accountLevel = 10;
+    map<string, string> labels = 11;
+    int64 createdAt = 12;
+    int64 updatedAt = 13;
+}
+
+// GetCommandRequest is the request body for GET /v1/chat/commands/{name}.
+message GetCommandRequest {
+    // @gotags: uri:"name"
+    string name = 1;
+}
+
+// GetCommandResponse is the response body for GET /v1/chat/commands/{name}.
+message GetCommandResponse {
+    Command command = 1;
+}
+
+// ListCommandRequest is the query for GET /v1/chat/commands.
+message ListCommandRequest {
+    // @gotags: form:"offset"
+    int32 offset = 1;
+    // @gotags: form:"limit"
+    int32 limit = 2;
+    // namespace narrows the listing. Empty lists the catalogue once per command
+    // name across every namespace the chat server publishes into.
+    // @gotags: form:"namespace"
+    string namespace = 3;
+}
+
+// ListCommandResponse is the response body for GET /v1/chat/commands.
+message ListCommandResponse {
+    repeated Command commands = 1;
+    int64 count = 2;
+}

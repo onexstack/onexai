@@ -1,0 +1,218 @@
+// Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// This file defines the media asset contract: the reference an image travels
+// as, and the asset row that gives it an identity.
+//
+// # The routes that serve these messages
+//
+// They are registered by hand (internal/agent/handler/asset.go) rather than by
+// a service definition, so this file is where they are written down:
+//
+//   POST   /v1/assets                 upload bytes, get an Asset and its ImageRef
+//   GET    /v1/assets/{assetID}       read the row
+//   GET    /v1/assets/{assetID}/content   read the bytes
+//   DELETE /v1/assets/{assetID}       remove the row and the object
+//   GET    /media/{objectKey}         the bytes, for a store that keeps them on
+//                                     this machine; an object store serves its own
+//
+// # Reading an image
+//
+// Use GET /v1/assets/{assetID}/content. Asset.url and ImageRef.url are the
+// object's *address*, not a grant to fetch it — see the field comments, and the
+// Store interface in pkg/media for why a private bucket is deliberate.
+//
+syntax = "proto3"; // Specifies the syntax version used in this file.
+
+package agent.v1;
+
+import "github.com/onexstack/defaults/defaults.proto";
+
+option go_package = "github.com/onexstack/onexai/pkg/api/agent/v1;v1";
+
+// ImageRef names an image without carrying its bytes.
+//
+// It mirrors pkg/media.Ref, and the field names are the JSON tags that
+// type marshals with — so a caller that speaks JSON to one service is speaking
+// the same shape to another, and an upstream that never imports this package
+// can still produce a ref this service understands. That is why the field
+// names are snake_case rather than the camelCase the rest of this file uses:
+// the wire form is the contract, and the wire form is JSON.
+//
+// A ref is deliberately *not* a promise that the bytes are reachable. It is a
+// name, and resolving it is a separate step with its own failure.
+message ImageRef {
+    // assetID is this service's identity for the object ("img_…").
+    string asset_id = 1;
+    // objectKey is the store-relative key, when a caller can reach the store
+    // directly and need not round-trip through the asset table.
+    string object_key = 2;
+    // url is the object's address on whichever store holds it: an absolute
+    // bucket URL, or a relative "/media/…" path when this service serves the
+    // object itself. It is empty when neither applies.
+    //
+    // It is where the object *is*, not a grant to read it. An object store's
+    // bucket may be private, in which case fetching this URL answers 403 — the
+    // address has to be storable, and a signed link would expire while the row
+    // that holds it does not. To read the bytes, use
+    // GET /v1/assets/{asset_id}/content, which goes through this service's own
+    // credentials and works whichever store is configured.
+    string url = 3;
+    // mimeType is the media type, e.g. image/png. The model edge needs it to
+    // render the bytes as a data URL.
+    string mime_type = 4;
+    // size is the object size in bytes. 0 means unknown.
+    int64 size = 5;
+    // width and height are pixels. 0 means unknown or not an image.
+    int32 width = 6;
+    int32 height = 7;
+    // name is the original filename, for display.
+    string name = 8;
+    // source records the producing surface: upload | lark | url | generated.
+    string source = 9;
+}
+
+// Asset is one stored image, as the API reports it.
+message Asset {
+    // assetID is the identity the ref carries.
+    string asset_id = 1;
+    // kind is the asset kind: image | generated | avatar.
+    string kind = 2;
+    // url is the object's address on whichever store holds it. See ImageRef.url
+    // for why it is not a grant: read the bytes from
+    // GET /v1/assets/{asset_id}/content rather than fetching this.
+    string url = 3;
+    // mimeType is the sniffed media type. It is the type read from the bytes,
+    // never the type the uploader declared.
+    string mime_type = 4;
+    // size is the object size in bytes.
+    int64 size = 5;
+    // width and height are pixels, when the format could be decoded.
+    int32 width = 6;
+    int32 height = 7;
+    // name is the original filename.
+    string name = 8;
+    // source records the producing surface.
+    string source = 9;
+    // createdAt is the unix timestamp the asset was stored at.
+    int64 created_at = 10;
+    // expiresAt is the unix timestamp the object may be reclaimed at. 0 means
+    // it does not expire.
+    int64 expires_at = 11;
+}
+
+// CreateAssetRequest uploads an image.
+//
+// # Why the bytes are base64 in a JSON body
+//
+// The alternative is multipart/form-data, which is what a browser sends and
+// what this endpoint will accept when the console is wired to it. It is not
+// what this request is, because the only caller today is oai-chat-apiserver,
+// and every call it makes is AK/SK-signed over the JSON body it sends. A
+// multipart body is not JSON, so a service-to-service upload would need a
+// second signing scheme — a second thing to get wrong, for a 33% saving on a
+// request that crosses a local network once per image.
+message CreateAssetRequest {
+    // kind is the asset kind: image | generated | avatar.
+    string kind = 1 [(defaults.value).string = "image"];
+    // ownerID is the identity the asset belongs to, used for the ownership
+    // check and the key's directory. A signed service caller sets it to the
+    // human the image came from, not to itself.
+    string ownerID = 2;
+    // filename is the original file name. It is sanitised, and it decides the
+    // object's extension when it has a usable one.
+    string filename = 3;
+    // mimeType is the type the caller believes the file is. It is advisory: the
+    // type that is stored is the one sniffed from the bytes, and this is
+    // consulted only for a format the sniffer does not recognise.
+    string mimeType = 4;
+    // data is the object's bytes, base64-encoded. Standard encoding, no
+    // padding requirement beyond what the decoder accepts.
+    string data = 5;
+    // source records the producing surface: upload | lark | url | generated.
+    string source = 6 [(defaults.value).string = "upload"];
+}
+
+// CreateAssetResponse is the answer to an upload.
+message CreateAssetResponse {
+    Asset asset = 1;
+}
+
+// PresignAssetRequest asks for a URL a client may upload to directly.
+message PresignAssetRequest {
+    // kind is the asset kind to upload.
+    string kind = 1;
+    // filename is the original file name.
+    string filename = 2;
+    // mimeType is the type the client declares. It is bound into the
+    // signature, so the client cannot upload a different type than the one the
+    // service accepted.
+    string mime_type = 3;
+    // size is the declared size in bytes, checked against the kind's ceiling.
+    int64 size = 4;
+}
+
+// PresignAssetResponse tells a client where to put the bytes.
+message PresignAssetResponse {
+    // assetID is the identity reserved for the pending asset.
+    string asset_id = 1;
+    // uploadURL is the URL to PUT to.
+    string upload_url = 2;
+    // method is the HTTP verb, normally PUT.
+    string method = 3;
+    // headers must be sent with the upload. A signature that covers the
+    // content type requires the client to send the same one.
+    map<string, string> headers = 4;
+    // objectKey is where the object will land, needed to confirm the upload.
+    string object_key = 5;
+    // expiresIn is the URL's lifetime in seconds.
+    int32 expires_in = 6;
+}
+
+// CompleteAssetRequest confirms that a presigned upload happened.
+message CompleteAssetRequest {
+    // objectKey is the key the presign response handed out.
+    string object_key = 1;
+    // mimeType is the type the client uploaded.
+    string mime_type = 2;
+    // size is the size the client uploaded.
+    int64 size = 3;
+}
+
+// CompleteAssetResponse is the confirmed asset.
+message CompleteAssetResponse {
+    Asset asset = 1;
+}
+
+// GetAssetRequest reads one asset's metadata.
+message GetAssetRequest {
+    // assetID identifies the asset.
+    // @gotags: uri:"assetID"
+    string asset_id = 1;
+}
+
+// GetAssetResponse is the asset.
+message GetAssetResponse {
+    Asset asset = 1;
+}
+
+// DeleteAssetRequest removes one asset.
+message DeleteAssetRequest {
+    // assetID identifies the asset.
+    // @gotags: uri:"assetID"
+    string asset_id = 1;
+}
+
+// DeleteAssetResponse is empty on success.
+message DeleteAssetResponse {}

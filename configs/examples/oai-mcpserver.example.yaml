@@ -1,0 +1,63 @@
+
+mcp-transport: stdio
+addr: 0.0.0.0:8080
+otel:
+  endpoint: 127.0.0.1:4327
+  service-name: oai-mcpserver
+  # 支持 otel、console、file、slog、classic、hybrid：
+  # - otel:
+  #   - logs -> otel collector agent
+  #   - metrics -> otel collector agent
+  #   - traces -> otel collector agent
+  # - file:
+  #   - logs -> 以 opentelemetry 格式，输出到 <output-dir>/logs.json 文件中
+  #   - metrics -> 以 opentelemetry 格式，输出到 <output-dir>/metrics.json 文件中
+  #   - traces -> 以 opentelemetry 格式，输出到 <output-dir>/traces.json 文件中
+  # - console:
+  #   - logs -> 以 opentelemetry 格式，输出到标准输出中
+  #   - metrics -> 以 opentelemetry 格式，输出到标准输出中
+  #   - traces -> 以 opentelemetry 格式，输出到标准输出中
+  # - classic:
+  #   - logs -> 输出到标准输出中（自定义结构化日志）
+  #   - metrics -> 输出到 promethus export 中
+  #   - traces -> 关闭 trace
+  # - hybrid:
+  #   - logs -> 输出到标准输出中（自定义结构化日志）
+  #   - metrics -> 输出到 promethus export 中
+  #   - traces -> 输出到 otel collector agent 中
+  # output-dir: ./otel # file mode 下，文件输出路径
+  output-mode: classic
+  level: debug
+  add-source: false
+  slog: # 该配置项只有 output-mode 为 hybrid, classic 时生效
+    format: json
+    time-format: "2006-01-02 15:04:05"
+    output: stdout # 支持 stdout, stderr, or file path
+coredb:
+  # dialect selects the backend: mysql | postgres (empty = mysql).
+  #   postgres: addr is host:5432, tables live in agent / chat / job schemas
+  #             (see pkg/dbschema). This service registers no tables of
+  #             its own, so it only needs the connection.
+  dialect: mysql
+  addr: 127.0.0.1:3306
+  username: onex
+  password: "CHANGE_ME"
+  database: onex
+fake:
+  # fake 访问地址
+  endpoint: http://127.0.0.1:9999
+  # 访问 fake 时的 User-Agent
+  user-agent: oai-mcpserver
+  # 开启 resty 客户端的 debug 模式
+  debug: true
+  # 访问远端服务时的超时时间
+  timeout: 30s
+oss:
+  # oss 访问地址
+  endpoint: http://127.0.0.1:9999
+  # 访问 oss 时的 User-Agent
+  user-agent: oai-mcpserver
+  # 开启 resty 客户端的 debug 模式
+  debug: true
+  # 访问远端服务时的超时时间
+  timeout: 30s

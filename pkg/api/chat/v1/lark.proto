@@ -1,0 +1,57 @@
+// Lark API definition, which includes the unified message receiver and
+// message-sending request/response messages.
+syntax = "proto3"; // Specifies the syntax version used by this file.
+
+package chat.v1;
+
+option go_package = "github.com/onexstack/onexai/pkg/api/chat/v1;v1";
+
+// Receiver identifies where to reply for an inbound Lark event — and only that.
+// Who triggered it is a different question with a different answer, and it is
+// carried beside this rather than inside it (see Sender in lark.go), because a
+// target that also holds an identity is how an address and an identity come to
+// be read as one value.
+message Receiver {
+    // type is the receiver type: "open_id" | "chat_id" | "user_id".
+    string type = 1;
+
+    // id is the receiver identifier (an open_id, chat_id or user_id).
+    string id = 2;
+
+    // Field 3 was sender_id, "the user who triggered the event". It is retired:
+    // it was a second home for the caller's identity, and for a direct message it
+    // held the same string as id — which is what let the two be mistaken for one
+    // value whose absence broke both (a sender outside this tenant has no
+    // user_id, so the identity and the reply's address went missing together).
+    // The identity lives on the caller now: Go's v1.Sender, read as
+    // DynamicRuntime.Identity().
+    reserved 3;
+    reserved "sender_id";
+
+    // message_id is the message (or card) being replied to.
+    string message_id = 4;
+
+    // parent_message_id is the ID of the message being replied to, if any.
+    string parent_message_id = 5;
+}
+
+// MessageContent holds the content of an outbound message.
+message MessageContent {
+    // type is the message content type: "text" | "rich_text" | "card".
+    string type = 1;
+
+    // text is the plain-text payload.
+    string text = 2;
+
+    // raw is the original IM payload, when present.
+    string raw = 3;
+}
+
+// SendMessageRequest is the request to send a message to a receiver.
+message SendMessageRequest {
+    // receiver is the message destination.
+    Receiver receiver = 1;
+
+    // content is the message payload.
+    MessageContent content = 2;
+}

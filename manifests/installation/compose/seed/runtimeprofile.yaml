@@ -1,0 +1,20 @@
+# A remote A2A runtime for the compose echo container.
+#
+# Applying this (and the Agent below) is optional: the gateway's default
+# in-process eino runtime is what serves "agent": "default". This profile is how
+# you exercise the oai-agent-runtime container.
+apiVersion: agent.onexai.io/v1alpha1
+kind: RuntimeProfile
+metadata:
+  name: runtime-echo
+  namespace: default
+spec:
+  enabled: true
+  displayName: Compose echo runtime
+  description: Dependency-free A2A runtime shipped with the compose stack.
+  kind: a2a
+  endpoint: http://oai-agent-runtime:8080
+  modelAccess: proxy
+  limits:
+    runTimeout: 1m
+    maxConcurrentRuns: 2

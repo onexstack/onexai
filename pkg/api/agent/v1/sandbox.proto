@@ -1,0 +1,113 @@
+// Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// This file defines the Protobuf messages for containerized command execution.
+//
+// A sandbox is one disposable container: no network, a read-only root, a
+// non-root user, and a workspace that disappears with it. It exists so a model
+// can run a command without running it on the host.
+//
+syntax = "proto3"; // Specifies the syntax version used in this package.
+
+package agent.v1;
+
+import "github.com/onexstack/defaults/defaults.proto";
+
+option go_package = "github.com/onexstack/onexai/pkg/api/agent/v1;v1";
+
+// Sandbox is one running container.
+message Sandbox {
+    string id = 1;
+    string owner = 2;
+    string template = 3;           // Template the container was created from.
+    string image = 4;              // Image the container runs.
+    string containerId = 5;        // Runtime's own id, for an operator to find it.
+    string state = 6;              // "ready" | "stopped" | "expired"
+    int64 expiresAt = 7;           // unix milliseconds
+    int64 createdAt = 8;           // unix milliseconds
+}
+
+// ExecResult is one command's outcome.
+message ExecResult {
+    string output = 1;             // Combined stdout and stderr.
+    int32 exitCode = 2;
+    // truncated reports that output hit the configured cap and was cut. A
+    // caller that ignores it will treat a partial log as a complete one.
+    bool truncated = 3;
+}
+
+message CreateSandboxRequest {
+    string owner = 1 [(defaults.value).string = "service"]; // Owner; empty means the authenticated caller.
+    string template = 2;           // Template name; empty means the default.
+    int32 ttlSeconds = 3;          // Lifetime; zero means the template's.
+}
+
+message CreateSandboxResponse {
+    Sandbox sandbox = 1;
+}
+
+message GetSandboxRequest {
+    // @gotags: uri:"id" form:"-"
+    string id = 1;
+    // @gotags: form:"owner"
+    string owner = 2 [(defaults.value).string = "service"];
+}
+
+message GetSandboxResponse {
+    Sandbox sandbox = 1;
+}
+
+message DeleteSandboxRequest {
+    // @gotags: uri:"id" form:"-"
+    string id = 1;
+    // @gotags: form:"owner"
+    string owner = 2 [(defaults.value).string = "service"];
+}
+
+message DeleteSandboxResponse {}
+
+message ExecSandboxRequest {
+    // @gotags: uri:"id"
+    string id = 1;
+    string owner = 2 [(defaults.value).string = "service"];
+    string command = 3;            // Shell command to run inside the container.
+    int32 timeoutSeconds = 4;      // Zero means the sandbox's own bound.
+}
+
+message ExecSandboxResponse {
+    ExecResult result = 1;
+}
+
+message ReadSandboxFileRequest {
+    // @gotags: uri:"id" form:"-"
+    string id = 1;
+    // @gotags: form:"owner"
+    string owner = 2 [(defaults.value).string = "service"];
+    // @gotags: form:"path"
+    string path = 3;               // Path inside the workspace.
+}
+
+message ReadSandboxFileResponse {
+    string content = 1;
+}
+
+message WriteSandboxFileRequest {
+    // @gotags: uri:"id"
+    string id = 1;
+    string owner = 2 [(defaults.value).string = "service"];
+    string path = 3;
+    string content = 4;
+}
+
+message WriteSandboxFileResponse {}

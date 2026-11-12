@@ -1,0 +1,187 @@
+{{- /*
+oai-declserver —— onexai 的声明式控制面。
+
+它不是 kube-apiserver 的聚合扩展，而是一个**独立**的 generic apiserver：自带
+core/v1（namespaces/events/configmaps/secrets/endpoints）、rbac、admissionregistration、
+apiextensions、apiregistration，以及 agent.onexai.io / chat.onexai.io 两组。
+所以运行时把它当成一个完整 API server 用，kubeconfig 直接指向下面的 Service，
+不需要 APIService 聚合，也不需要真 kube-apiserver 参与。
+
+数据落在集群 etcd 上（与 kube-apiserver 同一套），靠 --etcd-prefix 隔离。
+*/ -}}
+{{- if .Values.controlplane.enabled }}
+{{- $cp := .Values.controlplane }}
+{{- $ds := $cp.declserver }}
+{{- $svc := "oai-declserver" }}
+{{- $prefix := $cp.etcd.prefix }}
+{{- /*
+前缀守卫：这个值配错就是往集群数据里写。两个硬约束——
+  1) 必须落在 /onexai.io 之下（本部署独占的键空间）；
+  2) 绝不能是 /registry 或它的子路径（那是 kube-apiserver 的 keyspace）。
+渲染期就失败，而不是等它在线上覆盖掉集群对象。
+*/ -}}
+{{- if or (eq $prefix "/registry") (hasPrefix "/registry/" $prefix) }}
+{{- fail (printf "controlplane.etcd.prefix=%q 落在 kube-apiserver 的 /registry 之下，拒绝渲染" $prefix) }}
+{{- end }}
+{{- if not (hasPrefix "/onexai.io" $prefix) }}
+{{- fail (printf "controlplane.etcd.prefix=%q 不在 /onexai.io 之下，拒绝渲染" $prefix) }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $svc }}
+  labels:
+    app: {{ $svc }}
+    {{- include "onexai.labels" . | nindent 4 }}
+spec:
+  replicas: {{ $ds.replicas }}
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 600
+  selector:
+    matchLabels:
+      app: {{ $svc }}
+  # 单副本：多副本并不比单副本更安全（没有 endpoint reconciler、没有 leader
+  # election，启动期的 system namespace / APIService 注册每个副本都会跑一遍），
+  # 而滚动时会短暂出现两个实例。Recreate 让「旧的下、新的上」是确定的。
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: {{ $svc }}
+      annotations:
+        checksum/certs: {{ include "onexai.controlplaneSecrets" . | sha256sum }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Secret 卷默认落成 root:root 0440，而容器以镜像里的 65532 运行 —— 没有 fsGroup
+      # 时证书与 kubeconfig 都读不了（2026-10-27 首次上线就是
+      # `open /etc/onexai/tls/tls.crt: permission denied` 的 CrashLoop）。
+      securityContext:
+        fsGroup: 65532
+      affinity:
+        {{- with .Values.global.scheduling.nodeAffinity }}
+        nodeAffinity:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      {{- with .Values.global.scheduling.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $svc }}
+          {{- /*
+          镜像 tag 与其余服务同一个来源：services.<名>.image.tag → global.image.tag。
+          这两个工作负载不在 services 循环里（启动参数、卷、探针都不一样），但
+          k8s-update.sh 仍用 --set services.<名>.image.tag 指定 tag，所以这里必须读
+          同一个键，否则单服务发布看起来成功、实际什么都不改。
+          */}}
+          {{- $svcImage := (default (dict) (index .Values.services $svc)).image }}
+          image: {{ include "onexai.image" (dict "root" $ "svcName" $svc "svcImage" $svcImage) }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          command: ["/app/oai-declserver"]
+          # 可写目录：apiextensions / aggregator 两个子 server 在没拿到显式证书时
+          # 会往相对 cwd 的 --cert-dir 写自签证书。这里显式给了服务端证书，
+          # 但把 cwd 放在可写的 /data 上，避免只读根文件系统下任何一次自签都变成崩溃。
+          workingDir: /data
+          args:
+            - --etcd-servers={{ $cp.etcd.servers }}
+            - --etcd-prefix={{ $prefix }}
+            - --etcd-cafile=/etc/onexai/etcd/ca.pem
+            - --etcd-certfile=/etc/onexai/etcd/client.pem
+            - --etcd-keyfile=/etc/onexai/etcd/client-key.pem
+            # compaction 走 etcd 根级的 compact_rev_key，压缩的是**全库 revision**，
+            # 不按 prefix 隔离。共享 etcd 上这件事由集群 kube-apiserver 独占。
+            - --etcd-compaction-interval={{ $cp.etcd.compactionInterval }}
+            # 这两个轮询会为每个注册的资源周期性发 Count/Range，共享 etcd 上只增噪音。
+            - --etcd-count-metric-poll-period={{ $cp.etcd.countMetricPollPeriod }}
+            - --etcd-db-metric-poll-interval={{ $cp.etcd.dbMetricPollInterval }}
+            - --secure-port={{ $ds.port }}
+            - --bind-address=0.0.0.0
+            - --tls-cert-file=/etc/onexai/tls/tls.crt
+            - --tls-private-key-file=/etc/onexai/tls/tls.key
+            - --token-auth-file=/etc/onexai/auth/tokens.csv
+            # 与 AlwaysAllow 的差别不是「更严一点」：运行时的 token 在 declserver
+            # 内部绑定 cluster-admin，未认证请求什么都拿不到。
+            #
+            # 注意：declserver **不** 跑 kube-apiserver 的 RBAC bootstrap，所以
+            # system:masters 不会自动拿到 cluster-admin。首次上线时必须先临时切成
+            # AlwaysAllow 建好绑定，再切回 RBAC —— 否则谁都进不去（建绑定本身就要权限）。
+            # 绑定本身已随首次上线写入 declserver 的 etcd（ClusterRole/Binding
+            # onexai-controlplane-admin → group system:masters），之后重启不需要重做。
+            - --authorization-mode=RBAC
+            # 值班组已改为 chat 服务 + PostgreSQL 自有的命令式资源。这里停用
+            # declserver 的 dutygroups 资源，保留 Go 类型与生成代码以便回滚；
+            # etcd 中的旧对象不删除。
+            - --runtime-config=chat.onexai.io/v1alpha1/dutygroups=false
+          env:
+            # generic apiserver 的 RecommendedOptions.CoreAPI 默认读
+            # $HOME/.onex/config。容器里没有那个文件，而 ONEXCONFIG 是它唯一的覆盖口
+            # （internal/controlplane/apiserver/options/options.go:145-149）——
+            # 不设这一项，declserver 启动即退出：
+            # `failed to load kubeconfig at "$HOME/.onex/config"`。
+            - name: ONEXCONFIG
+              value: /etc/onexai/controlplane/kubeconfig
+          ports:
+            - name: https
+              containerPort: {{ $ds.port }}
+              protocol: TCP
+          # tcpSocket 而不是 /healthz：healthz 在 --anonymous-auth 关闭后会 401，
+          # 探针会把一个健康的进程判死。真正验证 API 可用性的是后面的验收步骤。
+          readinessProbe:
+            tcpSocket: { port: https }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket: { port: https }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml (default .Values.global.resources $ds.resources) | nindent 12 }}
+          volumeMounts:
+            - { name: etcd-certs, mountPath: /etc/onexai/etcd, readOnly: true }
+            - { name: serving-tls, mountPath: /etc/onexai/tls, readOnly: true }
+            - { name: tokens, mountPath: /etc/onexai/auth, readOnly: true }
+            - { name: controlplane-kubeconfig, mountPath: /etc/onexai/controlplane, readOnly: true }
+            - { name: data-dir, mountPath: /data }
+            - { name: tmp-dir, mountPath: /tmp }
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          securityContext:
+            {{- toYaml .Values.global.containerSecurityContext | nindent 12 }}
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 60
+      volumes:
+        - name: etcd-certs
+          secret: { secretName: oai-declserver-etcd, defaultMode: 288 }
+        - name: serving-tls
+          secret: { secretName: oai-declserver-tls, defaultMode: 288 }
+        - name: tokens
+          secret: { secretName: oai-declserver-tokens, defaultMode: 288 }
+        - name: controlplane-kubeconfig
+          secret: { secretName: oai-controlplane-kubeconfig, defaultMode: 288 }
+        - { name: data-dir, emptyDir: {} }
+        - { name: tmp-dir, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $svc }}
+  labels:
+    app: {{ $svc }}
+    {{- include "onexai.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ $svc }}
+  ports:
+    - { name: https, port: 443, targetPort: https, protocol: TCP }
+{{- end }}

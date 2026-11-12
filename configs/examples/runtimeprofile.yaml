@@ -1,0 +1,63 @@
+# RuntimeProfile and RuntimeHosting examples.
+#
+# A RuntimeProfile is the contract; a RuntimeHosting is one way to deploy it.
+# An Agent selects a profile (spec.runtime.profileRef); an Agent that names none
+# runs on the deployment's default profile, which is the in-process eino runtime.
+
+apiVersion: agent.onexai.io/v1alpha1
+kind: RuntimeProfile
+metadata:
+  name: eino-inproc
+  namespace: helper-public
+spec:
+  enabled: true
+  displayName: In-process eino
+  kind: inproc
+  modelAccess: proxy
+---
+# A remote A2A runtime with a static endpoint. The endpoint must answer
+# /.well-known/agent-card.json for capability negotiation.
+apiVersion: agent.onexai.io/v1alpha1
+kind: RuntimeProfile
+metadata:
+  name: kagent
+  namespace: helper-public
+spec:
+  enabled: true
+  displayName: kagent ADK
+  kind: a2a
+  endpoint: http://127.0.0.1:18080
+  modelAccess: proxy
+  limits:
+    runTimeout: 10m
+    maxConcurrentRuns: 4
+---
+# Optional: let onexai run the runtime image itself. The image must be pinned by
+# digest; the hosting writes the instance endpoint back into the profile's
+# status.resolvedEndpoint.
+apiVersion: agent.onexai.io/v1alpha1
+kind: RuntimeHosting
+metadata:
+  name: kagent-pool
+  namespace: helper-public
+spec:
+  enabled: true
+  profileRef:
+    name: kagent
+  mode: docker
+  # Replace with a real digest-pinned image.
+  image: registry.example.com/kagent-adk@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  maxInstances: 2
+  idleTTL: 30m
+---
+apiVersion: agent.onexai.io/v1alpha1
+kind: Agent
+metadata:
+  name: example-on-kagent
+  namespace: helper-public
+spec:
+  enabled: true
+  displayName: Example agent on kagent
+  runtime:
+    profileRef:
+      name: kagent

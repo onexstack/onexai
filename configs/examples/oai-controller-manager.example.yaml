@@ -1,0 +1,78 @@
+# oai-controller-manager configuration (local deployment).
+#
+# The control plane's controllers only need the API server they reconcile
+# against; the kubeconfig stays a flag (--kubeconfig) because it is a client
+# connection, not component configuration.
+#
+# Generate the defaults for a new field with:
+#   oai-controller-manager --write-config-to /tmp/cm.yaml
+apiVersion: onexcontrollermanager.config.onexai.io/v1beta1
+kind: OneXControllerManagerConfiguration
+generic:
+  # A local deployment runs one instance, so there is no leadership to contend
+  # for: leaving election on would just add a Lease nobody needs.
+  leaderElection:
+    leaderElect: false
+    leaseDuration: 15s
+    renewDeadline: 10s
+    resourceLock: leases
+    resourceName: oai-controller-manager
+    resourceNamespace: kube-system
+    retryPeriod: 2s
+  # Nothing outside this machine has business talking to the control plane's
+  # health or metrics endpoints.
+  bindAddress: 127.0.0.1
+  healthzBindAddress: 127.0.0.1:20250
+  metricsBindAddress: 127.0.0.1:20251
+  controllers:
+    - '*'
+  parallelism: 16
+  syncPeriod: 10h0m0s
+# The resource mirror writes here. An empty addr disables the block, and that is
+# the right default for a file in the repository: credentials belong in ~/.onexai,
+# not here.
+#
+# Spelling differs on purpose from the runtime services' coredb block: this file
+# is decoded by the component-config machinery with strict JSON decoding, so its
+# keys are camelCase (`maxOpenConnections`, `logLevel`) and an unknown key is a
+# startup error. The services decode through viper/mapstructure and use kebab-case
+# (`max-open-connections`, `log-level`). Copying one block into the other is the
+# usual way to break a service.
+coredb:
+  dialect: postgres
+  addr: ""
+  username: ""
+  password: ""
+  database: onex
+  maxOpenConnections: 20
+  logLevel: 1
+# Projects control-plane resources into PostgreSQL so a List can be answered in
+# O(page) instead of O(N). Off by default: with it off the controller manager
+# behaves exactly as it did before the projection existed.
+mirror:
+  enabled: false
+  schema: mirror
+  kinds: []                      # empty means every kind
+  batchSize: 500
+  flushInterval: 50ms
+  sweepInterval: 5m             # also the refresh period of status-only changes
+garbageCollectorController:
+  enableGarbageCollector: true
+  concurrentGCSyncs: 20
+  gcIgnoredResources:
+    - resource: events
+    - group: events.k8s.io
+      resource: events
+# Prompt aggregation merges the Prompt objects bound to an agent into one
+# derived Prompt. The model is a Model object in the agent's namespace; an
+# agent's modelRef wins when it is set. The Model's credentialRef Secret must
+# hold a working key — a single bound prompt needs no model at all.
+promptAggregation:
+  model: deepseek-secured
+  maxTokens: 4000
+  maxInputTokens: 60000
+  timeout: 60s
+  # Must match oai-agent-apiserver's model.api-key-encryption-key. It opens the
+  # enc:v1: value the API stores in a Model's credential Secret. Empty leaves
+  # only legacy plaintext credentials usable.
+  modelAPIKeyEncryptionKey: ""

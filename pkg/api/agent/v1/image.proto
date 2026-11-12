@@ -1,0 +1,84 @@
+// Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// This file defines the OpenAI-compatible image-generation contract.
+//
+syntax = "proto3"; // Specifies the syntax version used in this file.
+
+package agent.v1;
+
+// ImageRef is the reference a generated image is returned as.
+import "agent/v1/asset.proto";
+
+// Specifies the Go package for generated code.
+option go_package = "github.com/onexstack/onexai/pkg/api/agent/v1;v1";
+
+// ImageGenerationRequest asks a model to draw something.
+//
+// The field names follow OpenAI's /v1/images/generations so a stock client can
+// be pointed at this endpoint; responseFormat keeps the contract's spelling.
+message ImageGenerationRequest {
+    // prompt is what to draw.
+    string prompt = 1;
+    // model names the image model. Empty falls back to the configured one.
+    string model = 2;
+    // size is the requested dimensions, e.g. "1024x1024". Empty uses the
+    // provider's default.
+    string size = 3;
+    // quality is the provider's quality knob, passed through uninterpreted.
+    string quality = 4;
+    // n is how many images to produce. 0 means one.
+    int32 n = 5;
+    // responseFormat is "url" (the default) or "b64_json", matching OpenAI.
+    // Both are answered from this service's own store: see GeneratedImage.
+    string responseFormat = 6;
+    // senderID is the identity the resulting assets belong to, so the
+    // ownership check on a later read compares the same value.
+    string senderID = 7;
+    // sessionID records which conversation asked, for the asset's provenance.
+    string sessionID = 8;
+}
+
+// GeneratedImage is one produced image.
+//
+// # Why url is this service's own
+//
+// A provider that answers with a temporary link gives a URL that expires, and
+// this service would be handing a caller a reference that stops working. So the
+// bytes are read from the provider, stored in this service's own media store,
+// and the reference that comes back is one this service will still serve
+// tomorrow. `b64Json` is filled only when the caller asked for it.
+message GeneratedImage {
+    // url is where this service serves the image.
+    string url = 1;
+    // b64Json is the image's bytes, base64-encoded. Set only for
+    // responseFormat "b64_json".
+    string b64Json = 2;
+    // assetID is the identity the image was stored under.
+    string asset_id = 3;
+    // revisedPrompt is the provider's rewrite of the prompt, when it gives one
+    // — some models restate the request before drawing it.
+    string revisedPrompt = 4;
+    // ref is the image as a reference, for a caller that forwards it rather
+    // than rendering it.
+    ImageRef ref = 5;
+}
+
+// ImageGenerationResponse is the answer to a generation request.
+message ImageGenerationResponse {
+    // created is the unix timestamp the images were produced at.
+    int64 created = 1;
+    // data holds the images, in the order they were produced.
+    repeated GeneratedImage data = 2;
+}

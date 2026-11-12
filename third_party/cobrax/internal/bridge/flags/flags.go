@@ -1,0 +1,194 @@
+package flags
+
+import (
+	"fmt"
+	"log/slog"
+	"sync"
+
+	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+)
+
+// FlagSchemaMapper maps a *pflag.Flag to a *jsonschema.Schema for a custom flag
+// type. A mapper returns handled=true to indicate that it has produced the
+// final schema for the flag (the built-in type mapping is skipped); returning
+// handled=false falls back to the built-in type mapping.
+type FlagSchemaMapper func(flag *pflag.Flag) (*jsonschema.Schema, bool)
+
+var (
+	mappersMu sync.RWMutex
+	// mappers maps a flag type name (flag.Value.Type()) to a custom schema
+	// mapper. Custom mappers are consulted before the built-in type mapping.
+	mappers = map[string]FlagSchemaMapper{}
+)
+
+// RegisterFlagSchemaMapper registers a custom schema mapper for the given flag
+// type name (the value returned by flag.Value.Type()). Registering a mapper for
+// a built-in type overrides the built-in mapping for that type. Registering a
+// mapper for an unknown type lets callers map custom pflag.Value implementations
+// that the built-in switch does not recognise.
+//
+// Registration is not safe for concurrent use with AddFlagToSchema; call it
+// during initialisation (before any server starts).
+func RegisterFlagSchemaMapper(typeName string, m FlagSchemaMapper) {
+	mappersMu.Lock()
+	defer mappersMu.Unlock()
+	mappers[typeName] = m
+}
+
+// lookupMapper returns the registered mapper for the given type name, if any.
+func lookupMapper(typeName string) (FlagSchemaMapper, bool) {
+	mappersMu.RLock()
+	defer mappersMu.RUnlock()
+	m, ok := mappers[typeName]
+	return m, ok
+}
+
+// isFlagRequired checks if a flag has been marked as required by Cobra.
+// Cobra uses the BashCompOneRequiredFlag annotation to track required flags.
+func isFlagRequired(flag *pflag.Flag) bool {
+	if flag.Annotations == nil {
+		return false
+	}
+
+	// Check if the flag has the required annotation
+	// The constant is defined as "cobra_annotation_bash_completion_one_required_flag" in Cobra
+	if val, ok := flag.Annotations[cobra.BashCompOneRequiredFlag]; ok {
+		// The annotation is present if the flag is required
+		return len(val) > 0 && val[0] == "true"
+	}
+
+	return false
+}
+
+// AddFlagToSchema adds a single flag to the schema properties.
+func AddFlagToSchema(schema *jsonschema.Schema, flag *pflag.Flag) {
+	flagSchema := &jsonschema.Schema{
+		Description: flag.Usage,
+	}
+
+	// Check if flag is marked as required in its annotations
+	// Cobra uses the BashCompOneRequiredFlag annotation to mark required flags
+	if isFlagRequired(flag) {
+		// Mark the flag as required in the schema
+		if schema.Required == nil {
+			schema.Required = []string{}
+		}
+
+		schema.Required = append(schema.Required, flag.Name)
+	}
+
+	// A registered custom mapper takes precedence over the built-in mapping.
+	t := flag.Value.Type()
+	if mapper, ok := lookupMapper(t); ok {
+		if customSchema, handled := mapper(flag); handled {
+			schema.Properties[flag.Name] = customSchema
+			return
+		}
+	}
+
+	// Set appropriate JSON schema type based on flag type
+	switch t {
+	case "bool":
+		flagSchema.Type = "boolean"
+	case "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64", "count":
+		flagSchema.Type = "integer"
+	case "float32", "float64":
+		flagSchema.Type = "number"
+	case "string":
+		if flag.Annotations != nil {
+			if schemaStrArray, ok := flag.Annotations["jsonschema"]; ok {
+				if len(schemaStrArray) == 0 {
+					slog.Warn(fmt.Sprintf("No value for jsonschema annotation for flag %s, treating as type string", flag.Name))
+					flagSchema.Type = "string"
+				} else {
+					var aSchema jsonschema.Schema
+					err := aSchema.UnmarshalJSON([]byte(schemaStrArray[0]))
+					if err != nil {
+						slog.Error(fmt.Sprintf("Error when decoding JSON schema for flag %s (%v), treating as type string", flag.Name, err))
+						flagSchema.Type = "string"
+					} else {
+						// Merge rather than replace: keep the flag usage as the
+						// description when the annotation schema does not provide
+						// its own, so the tool description is not lost.
+						if aSchema.Description == "" {
+							aSchema.Description = flag.Usage
+						}
+						flagSchema = &aSchema
+					}
+				}
+			} else {
+				slog.Debug(fmt.Sprintf("No annotation called jsonschema for flag %s, treating as type string", flag.Name))
+				flagSchema.Type = "string"
+			}
+		} else {
+			flagSchema.Type = "string"
+		}
+
+	case "stringSlice", "stringArray":
+		flagSchema.Type = "array"
+		flagSchema.Items = &jsonschema.Schema{Type: "string"}
+	case "intSlice", "int32Slice", "int64Slice", "uintSlice":
+		flagSchema.Type = "array"
+		flagSchema.Items = &jsonschema.Schema{Type: "integer"}
+	case "float32Slice", "float64Slice":
+		flagSchema.Type = "array"
+		flagSchema.Items = &jsonschema.Schema{Type: "number"}
+	case "boolSlice":
+		flagSchema.Type = "array"
+		flagSchema.Items = &jsonschema.Schema{Type: "boolean"}
+	case "durationSlice":
+		flagSchema.Type = "array"
+		flagSchema.Items = &jsonschema.Schema{Type: "string"}
+		flagSchema.Description += " (format: Go duration strings, e.g. '10s', '2h45m')"
+	case "ipSlice":
+		flagSchema.Type = "array"
+		flagSchema.Items = &jsonschema.Schema{Type: "string"}
+		flagSchema.Description += " (format: IPv4 or IPv6 addresses)"
+	case "ipNetSlice":
+		flagSchema.Type = "array"
+		flagSchema.Items = &jsonschema.Schema{Type: "string"}
+		flagSchema.Description += " (format: CIDR notation)"
+	case "stringToString":
+		flagSchema.Type = "object"
+		flagSchema.AdditionalProperties = &jsonschema.Schema{Type: "string"}
+		flagSchema.Description += " (format: key-value pairs)"
+	case "stringToInt", "stringToInt64":
+		flagSchema.Type = "object"
+		flagSchema.AdditionalProperties = &jsonschema.Schema{Type: "integer"}
+		flagSchema.Description += " (format: key-value pairs with integer values)"
+	case "duration":
+		// Duration is represented as a string in Go's duration format
+		flagSchema.Type = "string"
+		flagSchema.Description += " (format: Go duration string, e.g., '10s', '2h45m')"
+		flagSchema.Pattern = `^-?([0-9]+(\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$`
+	case "ip":
+		flagSchema.Type = "string"
+		flagSchema.Description += " (format: IPv4 or IPv6 address)"
+		flagSchema.Pattern = `^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.){3}(25[0-5]|(2[0-4]|1\d|[1-9]|)\d)$|^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4})$`
+	case "ipMask":
+		flagSchema.Type = "string"
+		flagSchema.Description += " (format: IP mask, e.g., '255.255.255.0')"
+	case "ipNet":
+		flagSchema.Type = "string"
+		flagSchema.Description += " (format: CIDR notation, e.g., '192.168.1.0/24')"
+		flagSchema.Pattern = `^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.){3}(25[0-5]|(2[0-4]|1\d|[1-9]|)\d)/([0-9]|[1-2][0-9]|3[0-2])$`
+	case "bytesHex":
+		flagSchema.Type = "string"
+		flagSchema.Description += " (format: hexadecimal string)"
+		flagSchema.Pattern = `^[0-9a-fA-F]*$`
+	case "bytesBase64":
+		flagSchema.Type = "string"
+		flagSchema.Description += " (format: base64 encoded string)"
+		flagSchema.Pattern = `^[A-Za-z0-9+/]*={0,2}$`
+	default:
+		// Default to string for unknown types
+		flagSchema.Type = "string"
+		flagSchema.Description += fmt.Sprintf(" (type: %s)", t)
+		slog.Debug("unknown flag type, defaulting to string", "flag", flag.Name, "type", t)
+	}
+
+	setDefaultFromFlag(flagSchema, flag)
+	schema.Properties[flag.Name] = flagSchema
+}

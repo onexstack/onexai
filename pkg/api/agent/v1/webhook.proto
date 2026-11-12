@@ -1,0 +1,100 @@
+// Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// This file defines the Protobuf messages for managing run-lifecycle webhooks.
+//
+syntax = "proto3"; // Specifies the syntax version used in this package.
+
+package agent.v1;
+
+option go_package = "github.com/onexstack/onexai/pkg/api/agent/v1;v1";
+
+import "agent/v1/clientconfig.proto";
+
+// Webhook is one configured run-lifecycle hook. An agent names the hooks its
+// runs call (Agent.Webhooks) rather than carrying their configuration, so the
+// URL, the credential and the timeout live in one row every agent naming it
+// shares.
+message Webhook {
+    string name = 1;               // Hook identifier, unique.
+    string status = 2;             // "enabled" | "disabled"
+    string url = 3;                // Endpoint to call; must carry a scheme.
+    // secretRef names a row in the secret store whose value is sent as the
+    // hook's token (X-Onexai-Token). Empty means the endpoint is called
+    // unauthenticated. It is a reference so the credential is not carried on a
+    // row that any list shows.
+    string secretRef = 4;
+    // events names the lifecycle moments this hook subscribes to: "onStart"
+    // (before a run, and the only one that can refuse it) and "onEnd" (after it
+    // has answered). One hook may take both; the delivery header tells them
+    // apart.
+    repeated string events = 5;
+    int32 timeoutSeconds = 6;      // bounds one call; onStart is on a run's critical path
+    string failureMode = 7;        // "ignore" (default) | "fail"
+    // headers are sent with every delivery, for an endpoint that needs more
+    // than the shared token. They cannot override the delivery headers.
+    map<string, string> headers = 8;
+    // template, when set, is rendered and sent as the request body instead of
+    // the default one.
+    string template = 9;
+    string owner = 10;
+    int64 createdAt = 11;          // unix milliseconds
+    int64 updatedAt = 12;          // unix milliseconds
+    // clientConfig addresses the endpoint with the shared Kubernetes-shaped
+    // ClientConfig. It replaces url when set.
+    ClientConfig clientConfig = 13;
+    // authToken is a write-only plaintext credential. The console sends it when
+    // the operator pastes a token; the service stores it in the secret store,
+    // replaces it with a managed secretRef, and never returns it.
+    string authToken = 14;
+    // type selects what this webhook is for: "run" (default), "authentication"
+    // (Kubernetes TokenReview) or "authorization" (SubjectAccessReview). Agents
+    // name the latter two in authnWebhooks/authzWebhooks.
+    string type = 15;
+    // audiences are sent in TokenReview.spec.audiences for an authentication
+    // webhook. Empty sends none.
+    repeated string audiences = 16;
+}
+
+message CreateWebhookRequest { Webhook webhook = 1; }
+message CreateWebhookResponse { Webhook webhook = 1; }
+message UpdateWebhookRequest { Webhook webhook = 1; }
+message UpdateWebhookResponse { Webhook webhook = 1; }
+message DeleteWebhookRequest {
+    // @gotags: uri:"name"
+    string name = 1;
+}
+message DeleteWebhookResponse {}
+message GetWebhookRequest {
+    // @gotags: uri:"name"
+    string name = 1;
+}
+message GetWebhookResponse { Webhook webhook = 1; }
+message ListWebhookRequest {
+    // offset is how many records to skip before the page. It is ignored when
+    // limit is zero, because that request asks for the whole list.
+    // @gotags: form:"offset"
+    int32 offset = 1;
+
+    // limit caps how many records the page holds. Zero means no limit, which is
+    // what this endpoint returned before it supported paging.
+    // @gotags: form:"limit"
+    int32 limit = 2;
+}
+message ListWebhookResponse {
+    repeated Webhook webhooks = 1;
+
+    // count is the total number of webhooks, independent of the page returned.
+    int64 count = 2;
+}

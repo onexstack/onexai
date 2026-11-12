@@ -1,0 +1,52 @@
+# Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# The SRE and admin lists, as role bindings.
+#
+# These two roles used to be two JSON rows in chat.setting (onexai-sre-user-id,
+# onexai-admin-user-id) that the chat service re-read every minute. They are now
+# bindings, which is what k8s keeps "who holds which role" in: a change is an
+# apply, the watch delivers it to the next lookup, and the audit log records who
+# made it.
+#
+# Apply against the control plane:
+#   kubectl --kubeconfig ~/.onexai/declserver.kubeconfig apply -f hack/rbac-bindings-seed.yaml
+#
+# Only User subjects are honoured: the chat service never sees a caller's groups,
+# so a group binding would be an indirection it cannot resolve. An SRE is also an
+# administrator by the service's own rule, so onexai-sre members need no admin
+# binding of their own.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: onexai-sre
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: onexai-sre
+subjects:
+  - kind: User
+    name: sre-user
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: onexai-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: onexai-admin
+subjects:
+  - kind: User
+    name: sre-user

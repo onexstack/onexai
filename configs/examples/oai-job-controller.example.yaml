@@ -1,0 +1,40 @@
+# oai-job-controller configuration — reconciles batch.onex.io Jobs and CronJobs.
+#
+# The controller talks to oai-declserver (the aggregated apiserver that serves
+# batch.onex.io) and to oai-agent-apiserver (where an agentrun Job is executed).
+# Load with:
+#   oai-job-controller --config configs/examples/oai-job-controller.example.yaml
+
+# Kubeconfig pointing at oai-declserver. The same file the other controllers use.
+kubeconfig: ""
+
+# The oai-agent-apiserver client the agentrun provider submits runs through.
+agent:
+  endpoint: "http://localhost:8080"
+  # Long enough to cover the provider's status polls; a run itself is
+  # asynchronous, so this bounds one request, not one agent run.
+  timeout: "30s"
+
+# The signed identity used for run submission. The schedule owner is asserted
+# in the request body, so this pair authenticates the controller, not the user.
+agent-aksk:
+  api-key: "oai-job-controller"
+  secret-key: ""
+
+# Restrict this instance to the listed provider types. Empty means all types.
+# Deploy one instance per type when a provider needs its own credentials or
+# scaling, mirroring the job-aws-vm pattern.
+job-types: []
+
+# How often a running Job re-checks its provider (the agent run API).
+provider-poll-interval: "2s"
+
+# Bound on concurrent Job reconciles.
+max-concurrent-reconciles: 20
+
+leader-elect: true
+leader-election-id: "oai-job-controller"
+leader-election-namespace: ""
+
+metrics-addr: ":8080"
+health-probe-addr: ":8081"

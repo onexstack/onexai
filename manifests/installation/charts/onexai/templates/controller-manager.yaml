@@ -1,0 +1,137 @@
+{{- /*
+oai-controller-manager —— 控制面的控制器。
+
+它只和 declserver 说话（--kubeconfig 指向 Service），做四件事：
+  1. 给 12 个 CR 写 status（Agent / AgentBinding / Model / Prompt / Skill /
+     MCPServer / KnowledgeBase / Webhook / AuthorizationRule / DutyGroup /
+     PeerBinding / BotApp）；
+  2. 按 spec.agents + agentSelector 聚合能力，并派生 Prompt 对象；
+  3. namespace 控制器与 ClusterRole aggregation（declserver 自己那套内置 RBAC）；
+  4. 垃圾回收。
+
+它**不**写 PostgreSQL：mirror 默认关闭，读路径本来就是控制面缓存。
+配置正文放在 _helpers.tpl 的 onexai.controllerManagerConfig 里，因为 Secret
+要用它的正文、Deployment 要用它的 sha256，两边必须是同一份。
+
+正文里有 modelAPIKeyEncryptionKey（解开用户模型 Secret 里的 enc:v1:），所以是
+Secret 而不是 ConfigMap——与 oai-agent-apiserver 的配置同一条纪律。
+*/ -}}
+{{- if .Values.controlplane.enabled }}
+{{- $cp := .Values.controlplane }}
+{{- $cm := $cp.controllerManager }}
+{{- $name := "oai-controller-manager" }}
+{{- $body := include "onexai.controllerManagerConfig" (dict "name" $name "modelKeyEncryptionKey" $cm.modelKeyEncryptionKey) }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels:
+    app: {{ $name }}
+    {{- include "onexai.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  {{ $name }}.yaml: |
+{{ $body | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    app: {{ $name }}
+    {{- include "onexai.labels" . | nindent 4 }}
+spec:
+  replicas: {{ $cm.replicas }}
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 600
+  selector:
+    matchLabels:
+      app: {{ $name }}
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+      annotations:
+        checksum/config: {{ $body | sha256sum }}
+        checksum/kubeconfig: {{ include "onexai.controlplaneSecrets" . }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # 与 declserver 同一条：没有 fsGroup，挂载的 kubeconfig 读不了。
+      securityContext:
+        fsGroup: 65532
+      affinity:
+        {{- with .Values.global.scheduling.nodeAffinity }}
+        nodeAffinity:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      {{- with .Values.global.scheduling.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $name }}
+          {{- /* 同 declserver：tag 走 services.<名>.image.tag → global.image.tag。 */}}
+          {{- $svcImage := (default (dict) (index .Values.services $name)).image }}
+          image: {{ include "onexai.image" (dict "root" $ "svcName" $name "svcImage" $svcImage) }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          command: ["/app/oai-controller-manager"]
+          workingDir: /data
+          args:
+            - --config=/app/etc/{{ $name }}.yaml
+            - --kubeconfig=/etc/onexai/controlplane/kubeconfig
+            # 值班组不再是声明式资源，dutygroup 控制器没有可协调的对象。
+            - --controllers=-dutygroup
+          ports:
+            - { name: healthz, containerPort: 20250, protocol: TCP }
+            - { name: metrics, containerPort: 20251, protocol: TCP }
+          readinessProbe:
+            httpGet: { path: /healthz, port: healthz }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: healthz }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml (default .Values.global.resources $cm.resources) | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /app/etc/{{ $name }}.yaml, subPath: {{ $name }}.yaml, readOnly: true }
+            - { name: controlplane-kubeconfig, mountPath: /etc/onexai/controlplane, readOnly: true }
+            - { name: data-dir, mountPath: /data }
+            - { name: tmp-dir, mountPath: /tmp }
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          securityContext:
+            {{- toYaml .Values.global.containerSecurityContext | nindent 12 }}
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: config
+          secret:
+            secretName: {{ $name }}
+            defaultMode: 420
+            items:
+              - key: {{ $name }}.yaml
+                path: {{ $name }}.yaml
+        # 只投 controller 那一份，落到与运行时相同的路径，于是 --kubeconfig 不用变。
+        - name: controlplane-kubeconfig
+          secret:
+            secretName: oai-controlplane-kubeconfig
+            defaultMode: 288
+            items:
+              - key: kubeconfig-controller
+                path: kubeconfig
+        - { name: data-dir, emptyDir: {} }
+        - { name: tmp-dir, emptyDir: {} }
+{{- end }}

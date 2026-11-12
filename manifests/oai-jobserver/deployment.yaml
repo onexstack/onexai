@@ -1,0 +1,117 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oai-jobserver
+  labels:
+    app: oai-jobserver
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 600
+  selector:
+    matchLabels:
+      app: oai-jobserver
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: oai-jobserver
+    spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: In
+                values:
+                - ""
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: oai-jobserver
+              topologyKey: kubernetes.io/hostname
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        operator: Exists
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+      - key: CriticalAddonsOnly
+        operator: Exists
+      containers:
+      - name: oai-jobserver
+        image:  docker.io/ghcr.io/onexstack/oai-jobserver:v0.0.0
+        imagePullPolicy: IfNotPresent
+        command:
+        - /app/oai-jobserver
+        - --config=/app/etc/oai-jobserver.yaml
+        ports:
+        - name: http
+          containerPort: 5555
+          protocol: TCP
+        resources:
+          requests:
+            cpu: 20m
+            memory: 100Mi
+          limits:
+            cpu: 50m
+            memory: 128Mi
+        #readinessProbe:
+          #httpGet:
+            #path: /healthz
+            #port: http
+          #initialDelaySeconds: 5
+          #periodSeconds: 10
+          #timeoutSeconds: 2
+          #failureThreshold: 3
+        #livenessProbe:
+          #httpGet:
+            #path: /healthz
+            #port: http
+          #initialDelaySeconds: 15
+          #periodSeconds: 20
+          #timeoutSeconds: 2
+          #failureThreshold: 3
+        volumeMounts:
+        - name: oai-jobserver
+          mountPath: /app/etc/oai-jobserver.yaml
+          subPath: oai-jobserver.yaml
+          readOnly: true
+        - name: host-time
+          mountPath: /etc/localtime
+          readOnly: true
+        - name: tmp-dir          # 新增挂载
+          mountPath: /tmp        # 挂载到 /tmp，默认读写
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: oai-jobserver
+        configMap:
+          name: oai-jobserver
+          defaultMode: 420
+          items:
+          - key: oai-jobserver.yaml
+            path: oai-jobserver.yaml
+      - name: host-time
+        hostPath:
+          path: /etc/localtime
+          type: "FileOrCreate"
+      - name: tmp-dir            # 新增 emptyDir 卷
+        emptyDir: {}

@@ -1,0 +1,118 @@
+// Copyright 2026 Lingfei Kong <colin404@foxmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// This file defines the Protobuf messages for managing MCP servers.
+//
+syntax = "proto3"; // Specifies the syntax version used in this file.
+
+package agent.v1;
+
+option go_package = "github.com/onexstack/onexai/pkg/api/agent/v1;v1";
+
+import "agent/v1/clientconfig.proto";
+
+// MCP represents an MCP (Model Context Protocol) server that exposes tools.
+message MCP {
+    // 14 was the pre-rename spelling of namespace; it is removed and must not
+    // be reused.
+    reserved 14;
+
+    string name = 1;
+    string displayName = 2;
+    string description = 3;
+    string status = 4;
+    string mode = 5;              // e.g. "direct"
+    string protocol = 6;          // "SSE" | "HTTP"
+    string url = 7;
+    string headers = 8;           // JSON string of custom HTTP headers
+    repeated string allowedTools = 9; // tool whitelist; empty = unrestricted
+    // requireApproval lists the tool-name patterns of this server that must be
+    // approved by a human before they run: an exact tool name, a "delete_*"
+    // prefix glob, or "*" for every tool the server exposes. It belongs to the
+    // server rather than to each agent using it, because a destructive tool
+    // stays gated no matter which agent is handed it. Empty means the server's
+    // tools run unapproved.
+    repeated string requireApprovals = 13;
+    map<string, string> labels = 10;
+    int64 createdAt = 11;
+    int64 updatedAt = 12;
+    // namespace is the object's namespace; empty = default.
+    string namespace = 16;
+    // resourceMappings is a JSON array describing how to extract a Resource from
+    // one of this server's tool calls, for resource-level authorization.
+    string resourceMappings = 15;
+    // tools is the last successful tool discovery for this server: the tool
+    // names and descriptions it published. It is observed state written by the
+    // runtime health reporter; create and update requests ignore it. Empty
+    // means the server has not successfully published a tool list yet (or has
+    // never been enabled).
+    repeated MCPProbedTool tools = 17;
+    // clientConfig is the shared Kubernetes-shaped endpoint configuration. It
+    // replaces url when set; headersRef still contributes static headers.
+    ClientConfig clientConfig = 18;
+}
+
+// TestMCPRequest asks the runtime to dial the MCP server described inline and
+// list its tools, without persisting anything. The form always sends the full
+// connection configuration (including headers read back from the row), so the
+// test reflects what the user sees rather than a stored copy.
+message TestMCPRequest { MCP mcp = 1; }
+
+// MCPProbedTool is one tool a probed server publishes.
+message MCPProbedTool {
+    string name = 1;
+    string description = 2;
+}
+
+// TestMCPResponse reports the outcome of one connectivity test. A failed test
+// is a valid response (ok=false), not an API error: the request was well
+// formed, the endpoint was not.
+message TestMCPResponse {
+    bool ok = 1;
+    string message = 2;
+    repeated MCPProbedTool tools = 3;
+    int64 latencyMs = 4;
+}
+
+message CreateMCPRequest { MCP mcp = 1; }
+message CreateMCPResponse { MCP mcp = 1; }
+message UpdateMCPRequest { MCP mcp = 1; }
+message UpdateMCPResponse { MCP mcp = 1; }
+message DeleteMCPRequest {
+    // @gotags: uri:"name"
+    string name = 1;
+}
+message DeleteMCPResponse {}
+message GetMCPRequest {
+    // @gotags: uri:"name"
+    string name = 1;
+}
+message GetMCPResponse { MCP mcp = 1; }
+message ListMCPRequest {
+    // offset is how many records to skip before the page. It is ignored when
+    // limit is zero, because that request asks for the whole list.
+    // @gotags: form:"offset"
+    int32 offset = 1;
+
+    // limit caps how many records the page holds. Zero means no limit, which is
+    // what this endpoint returned before it supported paging.
+    // @gotags: form:"limit"
+    int32 limit = 2;
+}
+message ListMCPResponse {
+    repeated MCP mcps = 1;
+
+    // count is the total number of MCP servers, independent of the page returned.
+    int64 count = 2;
+}

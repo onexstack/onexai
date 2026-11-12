@@ -1,0 +1,16 @@
+# Example Agent that runs on the compose echo runtime. It echoes the prompt, so
+# it proves the A2A path without a model credential. The gateway still requires
+# llm.base-url to be non-empty (its admission check is shared with the
+# in-process engine), so keep LLM_BASE_URL set even for this demo.
+apiVersion: agent.onexai.io/v1alpha1
+kind: Agent
+metadata:
+  name: runtime-echo
+  namespace: default
+spec:
+  enabled: true
+  displayName: Echo agent
+  description: Runs on the compose echo A2A runtime.
+  runtime:
+    profileRef:
+      name: runtime-echo

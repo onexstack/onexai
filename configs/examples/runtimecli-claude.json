@@ -1,0 +1,16 @@
+{
+  "name": "claude",
+  "description": "Claude Code A2A runtime",
+  "version": "v1",
+  "command": "claude",
+  "args": [
+    "-p", "{{prompt}}",
+    "--output-format", "stream-json",
+    "--verbose",
+    "--permission-mode", "bypassPermissions",
+    "--mcp-config", "/config/mcp.json"
+  ],
+  "format": "claude",
+  "workdir": "/workspace",
+  "sessionDir": "/data/sessions"
+}

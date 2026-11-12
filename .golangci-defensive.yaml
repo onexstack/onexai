@@ -1,0 +1,33 @@
+# Defense-in-depth checks that must stay green: they only fire on guards that
+# can never decide anything — the kind of nil/empty test that reads as caution
+# but is dead where it sits.
+#
+# This is deliberately narrower than .golangci.yaml. That file enables every
+# linter with no exclusions, so it reports thousands of pre-existing issues and
+# is not something CI can gate on. This one is a gate: it is green on the tree
+# as committed, so a new dead guard fails the build instead of joining a pile.
+#
+# Run it with `make lint.defensive` (or golangci-lint run -c .golangci-defensive.yaml).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+    - govet
+  settings:
+    staticcheck:
+      checks:
+        # `x == nil || len(x) == 0` — len already answers for nil.
+        - S1009
+        # `if x != nil { for range x }` — range already tolerates nil.
+        - S1031
+        # comparison that is always true or always false.
+        - SA4023
+    govet:
+      disable-all: true
+      enable:
+        # tautological nil comparisons and nil pointer dereferences.
+        - nilness
+        # call of a nil func value.
+        - nilfunc

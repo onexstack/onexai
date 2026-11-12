@@ -1,0 +1,493 @@
+# oai-agent-apiserver configuration — OneX LLMOps platform API server.
+#
+# The top-level keys map to the ServerOptions mapstructure tags. Load with:
+#   oai-agent-apiserver --config configs/examples/oai-agent-apiserver.example.yaml
+
+# HTTP listen address (unsecured).
+insecure:
+  addr: ":8080"
+
+# Database for resource persistence (store.source=sql). Empty = no DB.
+# dialect selects the backend: mysql | postgres (empty = mysql).
+#   postgres: addr is host:5432; the tables live in per-service schemas
+#             (agent / chat / job), see pkg/dbschema.
+#   mysql:    the flat onexai_<service>_* tables.
+# Keys are kebab-case here (viper/mapstructure). oai-controller-manager carries the
+# same block spelled camelCase — it is decoded with strict JSON decoding — so copy
+# keys, not the block: `log-level` there is a startup error.
+coredb:
+  dialect: mysql
+  addr: 127.0.0.1:3306
+  username: onex
+  password: "CHANGE_ME"
+  database: onex
+  log-level: 0
+
+# Authentication and authorization.
+#
+# anonymous-auth and authorization-mode: AlwaysAllow are refused at startup: the
+# first hands an unauthenticated caller a usable identity, the second an admin
+# one.
+#
+# Leave the mode empty for normal token validation. It must stay empty here:
+# while /v1 is signed with AK/SK (see bypass-aksk), /v1/admin — the management
+# surface a browser calls — is validated with the bearer token, and AlwaysDeny
+# refuses every request rather than only the ones that fail validation.
+auth:
+  anonymous-auth: false
+  authorization-mode: ""
+  # /v1/core/secrets 与 /v1/agent/authorizationrules 的第二道门（X-Onex-Control-Token）。
+  # 留空即关闭；开启时与 OneX 的 oai-agent.control-token 必须一致。
+  control-token: ""
+  # TokenReview / SubjectAccessReview 原生评审端点的调用方 Bearer Token。
+  # 留空 = 端点返回 503；控制台 /v1 评审走登录 JWT，不受此项影响。
+  webhook-token: ""
+  # Kubernetes 结构化认证配置（apiserver.config.k8s.io/v1
+  # AuthenticationConfiguration），例如 OIDC issuer 的 discovery/JWKS。
+  # 留空表示只使用平台 HS256 令牌。
+  authentication-config: ""
+
+# JWT signing key and expiry.
+#
+# The key must be set explicitly and must not be the built-in placeholder
+# ("change-me-in-production" or the onexstack default "CHANGE_ME"): the server
+# refuses to start on either. This value is a development key; replace it for any
+# deployment that is reachable by more than its operator. It may be overridden
+# with OAI_AGENT_APISERVER_JWT_KEY.
+jwt:
+  # Must match oai-chat-apiserver.dev.yaml: that service mints the token, this
+  # one validates it on /v1/admin. Two different keys is a login that works
+  # followed by a management surface that always answers 401.
+  #
+  # Left empty on purpose — see the same note in oai-chat-apiserver.dev.yaml. A
+  # committed sample must not carry a working signing key.
+  key: ""
+  expired: "24h"
+
+# Multi-level authorization. The defaults (enabled, OPA on) are kept when this
+# block is omitted.
+authz:
+  # Path to an apiserver.config.k8s.io/v1 AuthorizationConfiguration. When set,
+  # its webhook authorizers replace authz.webhook.endpoints; the platform's
+  # OPA/CMDB/Casdoor backends stay in the union. See
+  # configs/examples/authorization-config.example.yaml.
+  authorization-config: ""
+
+# Lark/Feishu application credentials.
+lark:
+  app-id: "cli_xxx"
+  app-secret: ""
+
+# LLM backend for the OpenAI-compatible /v1/chat/completions endpoint.
+llm:
+  base-url: ""                   # e.g. https://api.openai.com/v1
+  api-key:  ""
+  model:    "gpt-4o-mini"
+  # Cap on one completion's output; 0 leaves it to the model. Output bills at the
+  # dearest rate there is, so an uncapped ceiling is the most expensive default
+  # available. agent.max-output-tokens overrides this per caller surface.
+  max-tokens: 8192
+  # A user-configured endpoint is fetched by this process. Private/loopback
+  # targets are refused unless this is enabled (e.g. a self-hosted Ollama).
+  allow-private-endpoints: false
+  # Bounds one connectivity test of a user endpoint.
+  test-timeout: "15s"
+
+# Model endpoint storage.
+model:
+  # Empty: a user-owned endpoint cannot be saved, because its key is never
+  # written in plaintext. Inject a 16/24/32-byte key at deploy time via
+  # OAI_AGENT_APISERVER_MODEL_API_KEY_ENCRYPTION_KEY.
+  api-key-encryption-key: ""
+
+# AI agent flow.
+agent:
+  # Root of the per-agent skill checkouts. Empty turns the whole skill subsystem
+  # off: /v1/agent/agents/:name/context-skills then answers 404 ("skills are not
+  # configured on this deployment"), so an agent's as_cmd=Yes skills never reach
+  # the chat's /help. It also gates the deep agent's sandboxed filesystem/shell
+  # tools, whose allow-list root is this directory.
+  skills-dir: "/tmp/onexai-skills"
+  engine: "eino"                 # eino (adk agent + tools); the http engine was removed
+  runtime:
+    port-enabled: false
+    default-profile: ""
+    internal-addr: "127.0.0.1:8091"
+    token-key: ""
+  delegation:
+    # How many delegations one chain may contain. An agent delegates only to the
+    # agents its spec.delegates names, so this is the bound on a cycle, not the
+    # authority to delegate. 0 uses the default of 3.
+    max-depth: 3
+  sandbox:
+    enabled: false
+    image: ""
+    default-ttl: "30m"
+    max-ttl: "4h"
+    cpus: "0.5"
+    memory: "512m"
+    network: "none"
+    # egress-proxy: "http://egress-proxy:3128"   # exported as HTTP(S)_PROXY
+    # no-proxy: "localhost,127.0.0.1,.svc"
+  chat-model: ""
+  fallback-model: ""
+  max-retries: 2
+  retry-backoff: "500ms"
+  max-concurrent-per-conversation: 3
+  run-timeout: "5m"
+  session-idle-ttl: "168h"
+  session-idle-sweep: "1m"
+  tool-timeout: "2m"
+  # MCP tools come from the store's mcps rows, scoped per agent via AgentM.MCPs.
+  mcp-enabled: true
+  mcp-discovery-timeout: "15s"   # handshake + tool listing for one server
+  mcp-cache-ttl: "5m"            # how long a discovered tool set is served
+  # 自定义命令（http 类型）的出站边界。私网/回环默认禁止，url 目标可再用
+  # allowed-hosts 收敛；service 目标指向集群内 Service，不受白名单约束。
+  custom-command:
+    allowed-hosts: []            # 为空表示允许任意公网 host；支持 "*.example.com"
+    allow-plain-http: false      # 允许 http:// 外部目标
+    allow-private-hosts: false   # 允许私网/回环目标（SSRF 风险，慎开）
+    max-timeout: "60s"
+    max-response-bytes: 1048576
+    max-redirects: 2
+  # 工具搜索：把 MCP 工具先藏在一个 tool_search 条目后面，模型搜索后再露出。
+  # 默认关闭——每次模型调用前过滤工具列表会牺牲 prompt cache 命中，只有在 MCP
+  # schema 占据 prompt 大头时才划算。开启前先看 debug 日志里的
+  # "[agentbuilder] tool set"（tools / mcp_tools 两个数）作为基线。
+  tool-search:
+    enabled: false
+    min-tools: 40                # 低于这个数量的 MCP 工具不隐藏（0 = 40）
+    always-visible: []           # 必须始终可见的 MCP 工具名
+  # 把 agent 沙箱里的 AGENTS.md 注入每次模型调用（不写进会话状态，也就不参与摘要）。
+  # 默认关闭：仓库内容是半可信输入，开启等于声明信任 skills-dir 下检出的来源。
+  # 只有配了 skills-dir（存在沙箱）时才会生效。
+  agents-md:
+    enabled: false
+    files: ["AGENTS.md"]         # 相对沙箱根路径，按顺序读取
+    max-bytes: 16384             # 全部注入内容的上限，避免把上下文预算挤爆
+    per-file-max-bytes: 8192     # 单个文件上限
+  # 多模态 read_file：把沙箱里的图片/PDF 直接交给模型（而不是当文本读）。
+  # 默认关闭——只对视觉模型有意义，且文件字节会随模型调用发出。
+  # 需要 skills-dir（沙箱）存在；单文件上限 8MB。
+  multimodal-read:
+    enabled: false
+  # The default for a caller that never states a preference (direct REST, TUI).
+  # The chat always states one, so this does not affect the Lark card.
+  # 模型端点护栏：按端点限流 + 连续失败熔断。默认全关。
+  # 打开后，限流/熔断产生的错误会被上层的 retry / failover 看到，从而切到备用模型。
+  model-guard:
+    qps: 0                       # 每个端点每秒允许的调用数，0 = 不限
+    burst: 1                     # 突发容量
+    failure-threshold: 0         # 连续失败多少次打开熔断，0 = 不熔断
+    cooldown: "30s"              # 熔断打开后多久放行一个探针
+  show-reasoning: true
+  # 检索片段逐用户水印（默认关闭）。key 是 `ox-kbtrace --key <capability key>
+  # --print-subkey` 输出的 base64 子密钥；它只能写标记，不能签 capability 令牌。
+  # watermark:
+  #   enabled: true
+  #   key: ""
+  max-image-pixels: 0         # shrink an image larger than this before a model sees it; 0 = send the original
+  # 出图（drawing）。留空即为关闭，也是当前状态：不配 model 就没有 generate_image
+  # 工具，/v1/images/generations 也会以"未配置"拒绝。要开启就填一个能出图的模型
+  # —— DeepSeek 不出图，需要另配 base-url / api-key / model。
+  #
+  # 开启之后，模型在对话里可以调用 generate_image 画图，画出的图片会先落进上面的
+  # media 存储、再作为一条消息发回飞书或回给控制台。
+  image-model:
+    model: ""
+    base-url: ""              # empty = inherit llm.base-url
+    api-key: ""               # empty = inherit llm.api-key
+  enable-tracing: false
+  # Context budget (eino engine). History above max-context-tokens is summarized
+  # before the run; a run that grows to 1.5x it is summarized mid-run, and any
+  # single tool output longer than max-tool-output-chars has its middle elided.
+  # Keep max-context-tokens below roughly two thirds of the served model's
+  # context window: the mid-run rescue call is itself a model call over the
+  # context being reduced, and this middleware does not chunk.
+  max-context-tokens: 500000     # 0 disables all context management
+  context-preserve-tokens: 0     # tokens of newest history kept verbatim (0 = max/3)
+  # Caps one tool output, in characters; 0 disables it. This is the ceiling the
+  # knowledge-base retrievers measure their own rendering budget against (see
+  # agent.ragflow.max-chars), so it has to stay above theirs or the guard trims
+  # retrieval results in the middle. warnRetrievalBudget reports a deployment
+  # where it does not.
+  max-tool-output-chars: 16000
+  # Output ceiling per caller surface: a Lark card cannot show a 4000-token
+  # essay, a console page can, and both are the same model call. A surface is
+  # named by the AK/SK api-key the caller authenticates with — i.e. the service
+  # name — through surface-keys. A caller that matches no entry gets "default",
+  # so leaving surface-keys empty caps everyone the same way rather than
+  # accidentally capping someone at the wrong number.
+  max-output-tokens:
+    default: 8192
+    lark: 2048
+    onex: 16384
+  surface-keys:
+    "oai-chat-apiserver": lark      # the Lark bot's runs
+    "onex-agent-apiserver": onex    # the console and the community replies
+  # Daily ceiling on tokens one sender may spend; 0 disables it. A different
+  # guard from daily-quota above, which counts requests: one question answered
+  # from a knowledge base can cost what a hundred greetings do, so counting how
+  # often someone asks does not bound the bill. Checked before a run, charged
+  # after it (tokens are only known once the model has answered), so a sender
+  # may finish one run above the ceiling and the next one is refused. Needs
+  # Redis to count, like daily-quota.
+  daily-token-quota: 0
+  # Run-lifecycle hooks applied to a run whose agents declared none of their
+  # own. The names are rows in the webhook table (POST /v1/webhooks), resolved
+  # at call time. Empty means a run with no declared hook is checked by nothing.
+  #
+  # This is the floor for agents nobody configured: provisioning writes hook
+  # names onto every agent it creates, and an agent created any other way would
+  # otherwise run with no admission check at all — silently, because a missing
+  # hook looks exactly like a run that was allowed.
+  webhook-defaults: []
+  # Human-in-the-loop approval (eino engine). require-approval lists the
+  # tool-name patterns that need a human's approval before they run: an exact
+  # name, a "delete_*" glob, or "*" for everything. It is the server-wide
+  # default, unioned with what the run's agents and MCP servers declare of their
+  # own; empty gates nothing. A paused run ends its stream and is continued by
+  # POST /v1/agent/approve, so checkpoint-ttl is the only bound on how long it
+  # stays resumable and must outlast the slowest plausible answer.
+  #
+  # Leave this empty and gate at the source instead: a tool that belongs to one
+  # MCP server is declared on that server's onexai_agent_mcp row, as
+  #   MCP_NAME=oai-chat-apiserver MODE=set-require-approval=pipeline go run ./hack/mcpctl
+  # does for /pipeline. The gate then travels with the tool to every agent the
+  # server is granted to, and it can be read back with MODE=show.
+  require-approval: []
+  checkpoint-ttl: "24h"
+  # compat-approval-mode is what /v1/chat/completions does with a tool whose
+  # approval its caller cannot give — that endpoint has no card and no approve
+  # call. deny (default) refuses the tool and hands the model the refusal to
+  # explain; error fails the request; allow runs gated tools ungated there, for
+  # a deployment whose only OpenAI-compatible callers are trusted. It applies to
+  # that endpoint alone: a run started from a chat pauses for its approval
+  # however this is set.
+  compat-approval-mode: "deny"
+  # 知识库多查询实验：把问题改写成多种说法，分别检索后用 RRF 融合。
+  # 默认关闭——多一次模型调用 + N 倍检索请求，收益取决于语料。
+  # 打开时配一个 sample-rate 就是 A/B：两个实验组由 "[kbtool] retrieval"
+  # 日志行的 variant 字段（single / multiquery）区分。
+  kb-multiquery:
+    enabled: false
+    count: 2                     # 额外改写几条（0 = 2）
+    sample-rate: 0               # 0 或负数 = 全部参与；0.5 = 一半
+  # ── Knowledge bases ────────────────────────────────────────────────────────
+  # A knowledge base lives on one of two platforms (Dify or RAGFlow), chosen
+  # per record by `KnowledgeBaseM.platform`. Only the platforms configured below are dialable;
+  # a record naming one that is not is dropped when the run's tools are built,
+  # and a name no record carries is dropped too — both silently, which is why
+  # an empty block is the same as "no knowledge bases here" rather than an error.
+  #
+  # RAGFlow authenticates with a tenant-wide key and has no notion of an end
+  # user, so the datasets a run declares are the whole of its scope: this
+  # platform cannot filter by who is asking. Per-user scoping has to be
+  # expressed in which knowledge bases an agent lists. Leave base-url empty to
+  # disable; a base-url without an api-key is rejected at startup.
+  ragflow:
+    base-url: ""                 # e.g. http://ragflow.example.com:9380 (no /api/v1 suffix)
+    api-key:  ""
+    top-k: 5                     # merged-result ceiling; a record's own topK may lower
+                                 # its contribution but not raise it above this
+    # Caps the rendered retrieval result, in characters.
+    #
+    # It must stay under agent.max-tool-output-chars, and the relationship is
+    # enforced rather than advised: buildKnowledgeBaseTools pulls this value
+    # below that ceiling and warnRetrievalBudget says so at startup. The reason
+    # is the shape of the two cuts. This one happens at a document boundary and
+    # appends "(more results omitted)"; the context guard's happens in the
+    # middle of the text, keeping a head and a tail. Passages are ordered by
+    # relevance, so the middle is the evidence worth keeping — and a result cut
+    # there still reports the documents it dropped, which makes the sources
+    # shown for an answer name a reading that never happened.
+    max-chars: 12000
+    timeout: "30s"
+    similarity-threshold: 0      # fallback when a record sets no scoreThreshold;
+                                 # 0 here keeps RAGFlow's own default (0.2)
+    vector-similarity-weight: 0  # 0 keeps RAGFlow's own default (0.3)
+    rerank-id: ""                # empty disables reranking. The name must resolve
+                                 # on the tenant — list it with
+                                 # GET /api/v1/models?type=rerank
+    # Asks RAGFlow to extract keywords from the question and search with them
+    # too. Costs the platform one chat-model call per retrieval.
+    keyword: false
+    # Show RAGFlow's document name to the model as the passage's source.
+    #
+    # Off by default, and the default is a judgement about the upstream sync,
+    # not about this service: RAGFlow names a document after whatever wrote it.
+    # A sync that uses identifiers (a node id, a uuid) leaves nothing readable
+    # here, and an identifier shown where a name goes is noise. Turn it on for a
+    # corpus whose documents are titled for people.
+    document-name-as-source: false
+
+  # Re-score a knowledge-base retrieval before it is rendered: one extra model
+  # call that reorders the passages by how well they answer the question, drops
+  # the ones it rates irrelevant, and tells the model how much of the question
+  # they cover. Empty model disables it.
+  #
+  # Provider, base URL and key inherit from the primary model, so on a
+  # single-vendor deployment naming the model is the whole configuration.
+  #
+  # Its model is separate from agent.reviewer-model on purpose: configuring the
+  # reviewer also turns on the outbound security review, which has no switch of
+  # its own, so a shared model would have made this setting quietly change
+  # something else.
+  kb-grade-model:
+    model: ""                    # e.g. the primary model's name, or a smaller one
+    # base-url: ""               # empty = inherit from llm.base-url
+    # api-key: ""                # empty = inherit from llm.api-key
+
+  # Check a finished answer against the material the run retrieved: one more
+  # model call, on answers that retrieved something, that appends a caveat when
+  # the answer asserts something the material does not support or contradicts it
+  # without saying so. Empty model disables it.
+  #
+  # It exists because the prompt only *states* how to weigh the material against
+  # the model's own knowledge — nothing verifies that it did, and the failure it
+  # guards against (an answer written from memory while the log shows the corpus
+  # was queried) looks exactly like a grounded one from the outside.
+  #
+  # It never rewrites the answer, only annotates it: a rewrite would be a second
+  # answer, produced with less context than the first and delivered after the
+  # reader had read the first.
+  grounding-model:
+    model: ""                    # e.g. the primary model's name
+    # base-url: ""               # empty = inherit from llm.base-url
+    # api-key: ""                # empty = inherit from llm.api-key
+  # Agent-to-Agent（A2A）对外面。面本身恒开：三条路由在任何部署里都存在，
+  # 客户端据此区分"不提供"与"地址写错"；没有 agent 引擎时每个任务都会被拒。
+  # 卡片固定在源站根路径 /.well-known/agent-card.json（不在 /v1/chat/a2a 下），
+  # 公开可读；它指向的两个接口都要 AK/SK 签名，卡片里用 apiKey + 一个扩展声明签名头。
+  #
+  # a2a-public-url 是卡片对外发布的两个**接口**的绝对基地址，不是卡片自身位置。
+  # 留空则卡片带相对路径：同源取卡的客户端可用，严格的客户端不可用。不要用请求头
+  # 推导地址——卡片路由无鉴权，伪造 Host 就能把对端指向别处；确实全流量都过自控
+  # 代理时再打开 trusted-proxy。
+  a2a-public-url: ""
+  a2a-trusted-proxy: false
+  a2a-default-agent: ""        # A2A 请求未指定 agent 时的默认 agent 集；空 = 服务自身默认
+  a2a-description: ""          # 卡片描述；空则回落到 agent.description，再回落到通用文案
+
+# Usage reporting: where finished runs are reported so they land in OneX's
+# ledger (agent.usage_record, which the console's usage centre reads).
+#
+# Only the runs OneX never sees need this — the Lark conversations, which reach
+# this service directly — because every other surface is accounted for by
+# ox-agent-apiserver when it consumes the run's events. Empty endpoint disables
+# reporting, which is the right state for a deployment with no Lark surface.
+#
+# The token is OneX's control-API secret, byte for byte its internal-api.token.
+# Both fields must be set together; either one alone is refused at startup.
+usage-report:
+  endpoint: ""                   # e.g. http://ox-agent-apiserver:8188
+  token: ""
+  timeout: "5s"                  # bounds one report; the answer is already sent
+
+# AI resource store (agents/skills/mcps/knowledge-bases/prompts/models/secrets).
+#
+# source: sql (default) | "" (disabled). "mysql" is a deprecated alias for sql.
+# The database is the only backend: `bitable` used to select a Feishu
+# multi-dimensional table, and is now refused at startup rather than ignored.
+store:
+  source: "sql"
+  refresh-interval: "5m"
+  # Read backend per resource kind:
+  #   controlplane (default) — List and Get from the informer cache. List is O(N)
+  #     per request and memory grows with the kind.
+  #   mirror-list — List from the PostgreSQL projection (O(page)), Get still from
+  #     the cache. Reads stay strongly consistent; List may lag by mirror.max-lag.
+  #   mirror-full — List from the projection and the informer dropped entirely:
+  #     Get goes to the API server behind get-cache-size. Process memory stops
+  #     tracking the object count. Needs the projection running (see
+  #     oai-controller-manager mirror.enabled).
+  # A kind is switched over here, one at a time; leaving this alone changes
+  # nothing. Per-kind overrides, e.g. {AuthorizationRule: mirror-list}, are YAML
+  # only — a flag cannot carry a map.
+  read-backend: controlplane
+  read-backends: {}
+  mirror:
+    schema: mirror
+    max-lag: "10m"               # beyond this, List falls back to the cache
+    count-mode: exact            # exact | estimate (estimate reads the row count)
+  get-cache-size: 10000          # Get cache for kinds that read with mirror-full
+
+# Redis for agent sessions, cross-pod stop signaling, and the AK/SK nonce store.
+#
+# Empty addr means no Redis: sessions and run stops stay in process memory,
+# which is fine on one machine and silently wrong behind a load balancer —
+# every conversation would be pinned to the pod that created it.
+#
+# The connection keys are the platform's own, so a deployment fills them in the
+# same way as every other service. `username` is not decoration: the shared
+# servers are ACL-protected and a password alone is refused.
+redis:
+  addr: ""
+  username: ""
+  password: ""
+  database: 0
+  # Tighter than the scaffold's 5s/3s defaults on purpose. Both the session read
+  # and the nonce check are on the request path, so an unreachable server has to
+  # become a refused request quickly rather than a request that hangs.
+  dial-timeout: 2s
+  read-timeout: 1s
+  write-timeout: 1s
+  max-retries: 1
+  key-prefix: "onexai"
+  session-ttl: "24h"
+
+# Image storage: where the bytes of an uploaded or generated image live, and how
+# a remote image is fetched.
+#
+# local keeps the objects in a directory on this machine, which is what a
+# single-node deployment wants. cos keeps them in a Tencent COS bucket, which is
+# what a deployment with more than one replica needs: a second replica's
+# directory is empty, while every replica can reach a bucket. Setting the driver
+# to "" disables image storage, and the service then still answers every text
+# request.
+#
+# This file keeps driver: local so that it stays runnable as it is. The real
+# COS credentials live in ~/.onexai/oai-agent-apiserver.yaml, which is not
+# committed -- a SecretKey in this file would be a secret in the repository.
+#
+# oai-chat-apiserver has no media block on purpose. It stores nothing itself: it
+# hands an image to this service and keeps only the reference, so the bytes and
+# their lifecycle have exactly one owner.
+media:
+  driver: local               # local | cos | "" (disabled)
+  bucket-url: ""              # cos only: <name>-<appid>.cos.<region>.myqcloud.com
+  prefix: ""                  # cos only: key prefix inside the bucket; empty = root
+  secret-id: ""               # cos only
+  secret-key: ""              # cos only; never commit a real one
+  data-dir: ""                # local only; empty = <home>/.onexai/media
+  public-base-url: ""         # empty = relative /media/... URLs
+  sign-key: ""                # local only; empty = unsigned object URLs
+  max-fetch-bytes: 0          # 0 = package default (12 MiB)
+  # How long a stored image is kept. "0s" means never, which is the default:
+  # the number is a policy (how long a user's screenshot stays readable in a
+  # conversation they can still scroll back to), not a tuning knob this code
+  # should pick. It is stamped when the image is stored, so raising it later
+  # applies to what comes next rather than expiring images kept under the old
+  # value.
+  #
+  # It is a Go duration string, so it must parse: an empty value is a startup
+  # error, not "unset". Write "0s".
+  retention: "0s"              # e.g. "720h" for 30 days; "0s" = keep for ever
+  # The collector that reclaims expired images. Off until a retention is set:
+  # deleting a picture is not recoverable.
+  gc-enabled: false
+  gc-interval: "1h"
+  gc-batch: 200
+  allow-private-hosts: false  # on only if images live on an internal host
+
+controlplane:
+  kubeconfig: /etc/onexai/declserver.kubeconfig
+  namespace: ""
+  # Runtime settings an operator edits without a redeploy, e.g.
+  #   kubectl -n default create configmap oai-agent-settings --from-literal=sys_prompt='...'
+  # Read through the informer, so the edit applies to the next run. An absent
+  # ConfigMap or key just means the configuration file is the only source.
+  settings-configmap: oai-agent-settings
+  sync-timeout: 30s
+  resync-period: 60s

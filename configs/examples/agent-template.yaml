@@ -1,0 +1,63 @@
+# AgentTemplate + an Agent that references it.
+#
+# A template is a reusable behavior unit: prompts, model, capabilities and run
+# contract, but no identity, runtime or authorization. An agent opts in with
+# spec.templateRefs; the controller expands the template into the agent's
+# status.resolved, so editing the template changes every referencing agent
+# without touching them.
+
+apiVersion: agent.onexai.io/v1alpha1
+kind: AgentTemplate
+metadata:
+  name: incident-response
+  namespace: default
+spec:
+  enabled: true
+  displayName: Incident response
+  description: Shared behavior for on-call agents.
+  prompts:
+    - name: incident-persona
+  skills:
+    - name: triage
+  mcps:
+    - name: lark
+  knowledgeBases:
+    - name: runbooks
+  customCommands:
+    - name: deploy
+  webhooks:
+    - audit
+  requireApproval:
+    - "delete_*"
+  modelRef:
+    name: gpt-4o
+  outputSchema:
+    type: object
+    properties:
+      summary:
+        type: string
+    required:
+      - summary
+  sessionTools: true
+  memory:
+    enabled: true
+    embeddingModel: text-embedding-3
+---
+# The agent inherits everything the template declares. Its own fields win:
+# modelRef below overrides the template's model for this agent only.
+apiVersion: agent.onexai.io/v1alpha1
+kind: Agent
+metadata:
+  name: oncall-helper
+  namespace: default
+spec:
+  enabled: true
+  displayName: On-call helper
+  templateRefs:
+    - name: incident-response
+  modelRef:
+    name: gpt-4o-mini
+  # runtime and authorization are deliberately agent-only.
+  runtime:
+    profileRef:
+      name: eino-inproc
