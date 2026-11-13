@@ -35,7 +35,7 @@ require (
 	github.com/mark3labs/mcp-go v0.43.2
 	github.com/mattn/go-runewidth v0.0.31
 	github.com/minio/minio-go/v7 v7.2.1
-	github.com/onexstack/onexstack v1.0.8
+	github.com/onexstack/onexstack v1.0.9
 	github.com/onexstack/protoc-gen-defaults v0.0.2
 	github.com/open-policy-agent/opa v1.9.0
 	github.com/pkoukk/tiktoken-go v0.1.8
