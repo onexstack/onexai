@@ -59,7 +59,7 @@ jobs:
           go mod edit -dropreplace=github.com/onexstack/onexstack
           go mod download github.com/onexstack/onexstack
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
           args: --config=.golangci-defensive.yaml
