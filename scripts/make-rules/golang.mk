@@ -62,7 +62,10 @@ go.tidy: ## Automatically add/remove dependencies.
 go.test: ## Run unit tests.
 	@echo "===========> Running unit tests"
 	@mkdir -p $(OUTPUT_DIR)
-	@$(GO) test -race -cover \
+	# etcd's authpb and polarismesh's security both register a file named
+	# auth.proto. The protobuf runtime treats that as a fatal conflict by
+	# default; neither package is exercised here, so downgrade it to a warning.
+	@GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn $(GO) test -race -cover \
 		-coverprofile=$(OUTPUT_DIR)/coverage.out \
 		-timeout=10m -shuffle=on -short \
 		-v `go list ./...|egrep -v 'tools|vendor|third_party'`

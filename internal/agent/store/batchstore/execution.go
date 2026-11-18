@@ -56,7 +56,11 @@ func (s *ExecutionStore) ListExecution(
 	ctx context.Context, namespace, schedule string, limit int,
 ) ([]*model.ScheduledExecutionM, error) {
 	ns := rowNamespace(namespace, s.namespace)
-	list, err := s.client.Clientset.BatchV1beta1().Jobs(ns).List(ctx, metav1.ListOptions{})
+	// A cache-served list is enough for a paginated view and keeps this off
+	// the etcd quorum-read path.
+	list, err := s.client.Clientset.BatchV1beta1().Jobs(ns).List(ctx, metav1.ListOptions{
+		ResourceVersion: "0",
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -153,8 +157,10 @@ func (s *ExecutionStore) findCronJob(
 	if namespace != "" {
 		return s.client.Clientset.BatchV1beta1().CronJobs(namespace).Get(ctx, name, metav1.GetOptions{})
 	}
+	// Cross-namespace lookup by name; callers may write afterwards, so keep it
+	// a live read instead of a possibly stale cache entry.
 	list, err := s.client.Clientset.BatchV1beta1().CronJobs(metav1.NamespaceAll).List(ctx, metav1.ListOptions{
-		FieldSelector: "metadata.name=" + name,
+		FieldSelector: "metadata.name=" + name, //nolint:kubelistcheck // live lookup on a write path
 	})
 	if err != nil {
 		return nil, err
@@ -174,7 +180,7 @@ func (s *ExecutionStore) getJob(ctx context.Context, id string) (*batchv1beta1.J
 	// No namespace configured: the REST request carries only the execution ID,
 	// so find the Job across namespaces.
 	list, err := s.client.Clientset.BatchV1beta1().Jobs(metav1.NamespaceAll).List(ctx, metav1.ListOptions{
-		FieldSelector: "metadata.name=" + id,
+		FieldSelector: "metadata.name=" + id, //nolint:kubelistcheck // live lookup; CancelExecution deletes by result
 	})
 	if err != nil {
 		return nil, err

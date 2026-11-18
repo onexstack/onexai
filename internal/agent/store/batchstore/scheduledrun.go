@@ -133,7 +133,11 @@ func (s *BatchScheduledRunStore) Get(ctx context.Context, opts *where.Options) (
 // List implements ScheduledRunStore. It returns only CronJobs this facade owns.
 func (s *BatchScheduledRunStore) List(ctx context.Context, opts *where.Options) (int64, []*model.ScheduledRunM, error) {
 	ns := filterNamespace(opts, s.namespace)
-	list, err := s.client.Clientset.BatchV1beta1().CronJobs(ns).List(ctx, metav1.ListOptions{})
+	// A cache-served list is enough for a paginated view and keeps this off
+	// the etcd quorum-read path.
+	list, err := s.client.Clientset.BatchV1beta1().CronJobs(ns).List(ctx, metav1.ListOptions{
+		ResourceVersion: "0",
+	})
 	if err != nil {
 		return 0, nil, err
 	}
@@ -175,8 +179,10 @@ func (s *BatchScheduledRunStore) findCronJob(
 	if namespace != "" {
 		return s.client.Clientset.BatchV1beta1().CronJobs(namespace).Get(ctx, name, metav1.GetOptions{})
 	}
+	// Cross-namespace lookup by name; callers may write afterwards, so keep it
+	// a live read instead of a possibly stale cache entry.
 	list, err := s.client.Clientset.BatchV1beta1().CronJobs(metav1.NamespaceAll).List(ctx, metav1.ListOptions{
-		FieldSelector: "metadata.name=" + name,
+		FieldSelector: "metadata.name=" + name, //nolint:kubelistcheck // live lookup by name across namespaces
 	})
 	if err != nil {
 		return nil, err

@@ -185,7 +185,9 @@ func (b *biz) List(ctx context.Context, resource string) (*unstructured.Unstruct
 	if !ok {
 		return nil, fmt.Errorf("%w %q", ErrUnknownKind, resource)
 	}
-	list, err := b.client.Resource(kind.GroupVersionResource()).List(ctx, metav1.ListOptions{})
+	list, err := b.client.Resource(kind.GroupVersionResource()).List(ctx, metav1.ListOptions{
+		ResourceVersion: "0",
+	})
 	if err != nil {
 		return nil, err
 	}

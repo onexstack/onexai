@@ -64,9 +64,35 @@ COMPOSE := docker compose $(COMPOSE_ENV_ARG) -f $(COMPOSE_FILE)
 compose.build: ## Build the compose stack images.
 	@$(COMPOSE) build
 
+# Same build as `compose.build`, one service at a time. Docker Compose selects
+# the services itself: etcd, postgres and redis only declare `image:` and no
+# `build:` section, so Compose skips them in both targets and the image set is
+# identical. The only difference here is that each `compose build` invocation
+# gets a single service, so only one Go compile runs at a time.
+.PHONY: compose.build.serial
+compose.build.serial: ## Build the compose stack images one service at a time (low memory).
+	@set -e; \
+	services="$$($(COMPOSE) config --services | sort)"; \
+	if [ -z "$$services" ]; then \
+		echo "===========> No services found in $(COMPOSE_FILE)"; \
+		exit 1; \
+	fi; \
+	for svc in $$services; do \
+		echo "===========> Building $$svc"; \
+		$(COMPOSE) build $$svc; \
+	done; \
+	echo "===========> Serial compose build complete"
+
 .PHONY: compose.up
 compose.up: ## Start the compose stack (copy manifests/installation/compose/env.example to env first).
 	@$(COMPOSE) up -d --build
+
+# Same stack as `compose.up`. The images are built serially first, then started
+# with `--no-build`, so the build step of `up -d --build` never runs a second,
+# parallel pass; the resulting images and containers are identical.
+.PHONY: compose.up.serial
+compose.up.serial: compose.build.serial ## Build serially, then start the stack without building.
+	@$(COMPOSE) up -d --no-build
 
 .PHONY: compose.up.secure
 compose.up.secure: ## Start the compose stack with the secure profile.
@@ -176,4 +202,4 @@ help: Makefile ## Show available targets and usage.
 	@echo -e "$$USAGE_OPTIONS"
 
 # Pseudo targets (to avoid conflicts with files that may have the same name as the targets)
-.PHONY: all build test cover clean lint tidy format protoc add-copyright help verify verify.public verify-codegen format.protos gen-k8s lint.kubelistcheck compose.build compose.up compose.up.secure compose.down compose.logs compose.smoke
+.PHONY: all build test cover clean lint tidy format protoc add-copyright help verify verify.public verify-codegen format.protos gen-k8s lint.kubelistcheck compose.build compose.build.serial compose.up compose.up.serial compose.up.secure compose.down compose.logs compose.smoke

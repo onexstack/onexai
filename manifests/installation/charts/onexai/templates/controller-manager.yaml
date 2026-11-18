@@ -85,8 +85,6 @@ spec:
           args:
             - --config=/app/etc/{{ $name }}.yaml
             - --kubeconfig=/etc/onexai/controlplane/kubeconfig
-            # 值班组不再是声明式资源，dutygroup 控制器没有可协调的对象。
-            - --controllers=-dutygroup
           ports:
             - { name: healthz, containerPort: 20250, protocol: TCP }
             - { name: metrics, containerPort: 20251, protocol: TCP }

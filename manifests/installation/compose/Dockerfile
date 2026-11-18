@@ -31,7 +31,7 @@ COPY go.mod go.sum ./
 COPY third_party ./third_party
 # The working tree replaces onexstack with ../onexstack, which is outside the
 # build context. The only local change there is a log-noise suppression, and
-# go.mod already requires v1.0.8, so the image builds against the released
+# go.mod already pins a released version, so the image builds against that
 # module. Drop the replace only inside the build.
 RUN go mod edit -dropreplace=github.com/onexstack/onexstack
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -41,6 +41,12 @@ COPY . .
 # COPY above restores the repository go.mod, so drop the outside-context replace
 # again before building.
 RUN go mod edit -dropreplace=github.com/onexstack/onexstack
+# The repository go.sum is tidied against that local replace, so it carries no
+# content hash for the released module, and `go mod tidy` prunes one if it is
+# added. The build runs with -mod=readonly, which refuses to add the hash, so
+# record it here; the module is already in the cache mount above.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download github.com/onexstack/onexstack
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \

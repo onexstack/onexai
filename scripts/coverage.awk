@@ -4,9 +4,9 @@
   print $0
   if (match($0, /^total:/)) {
     sub(/%/, "", $NF);
-    printf("test coverage is %s% (quality gate is %s%)\n", $NF, target)
-    if (strtonum($NF) < target) {
-      printf("test coverage does not meet expectations: %d%, please add test cases!\n", target)
+    printf("test coverage is %s%% (quality gate is %s%%)\n", $NF, target)
+    if (($NF + 0) < target) {
+      printf("test coverage does not meet expectations: %d%%, please add test cases!\n", target)
       exit 1;
     }
   }

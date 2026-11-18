@@ -23,6 +23,16 @@ jobs:
       - name: Verify module path and public tree
         run: ./scripts/verify-public.sh
 
+      - name: Use the released onexstack module
+        # The working tree replaces onexstack with ../onexstack for local
+        # development; a fresh CI checkout has no sibling directory. Compose
+        # image builds already drop the replace and use the version required by
+        # go.mod, so do the same here and record the go.sum hash that go build
+        # needs.
+        run: |
+          go mod edit -dropreplace=github.com/onexstack/onexstack
+          go mod download github.com/onexstack/onexstack
+
       - name: Build
         run: go build ./...
 
@@ -30,6 +40,9 @@ jobs:
         run: go vet ./...
 
       - name: Test
+        env:
+          # etcd authpb and polarismesh security both register auth.proto.
+          GOLANG_PROTOBUF_REGISTRATION_CONFLICT: warn
         run: go test -short ./...
 
   lint:
@@ -41,6 +54,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Use the released onexstack module
+        run: |
+          go mod edit -dropreplace=github.com/onexstack/onexstack
+          go mod download github.com/onexstack/onexstack
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:

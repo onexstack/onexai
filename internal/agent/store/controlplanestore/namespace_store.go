@@ -214,6 +214,9 @@ func (s *namespaceStore) list(ctx context.Context) ([]*corev1.Namespace, error) 
 		}
 	}
 	if len(items) == 0 && s.client != nil {
+		// The informer answered empty, so a cache-served list would answer
+		// empty again; this fallback must read the control plane directly.
+		//nolint:kubelistcheck // informer fallback must read live
 		list, err := s.client.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return nil, err

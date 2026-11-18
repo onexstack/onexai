@@ -290,6 +290,8 @@ func (s *secretStore) listSecrets(ctx context.Context) ([]*corev1.Secret, error)
 		if s.client == nil {
 			return nil, nil
 		}
+		// The lister is absent or failed; a cache-served read cannot help.
+		//nolint:kubelistcheck // lister absent or failed; fall back to a live read
 		list, err := s.client.CoreV1().Secrets(s.namespace).List(ctx, metav1.ListOptions{
 			LabelSelector: selector.String(),
 		})

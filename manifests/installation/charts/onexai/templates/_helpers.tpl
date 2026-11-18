@@ -180,6 +180,9 @@ generic:
   metricsBindAddress: 0.0.0.0:20251
   controllers:
     - '*'
+    # DutyGroup is retired and declserver stops serving it; watching it makes
+    # cache sync fail. Use the canonical controller name, not the CLI alias.
+    - '-dutygroup-controller'
   parallelism: 16
   syncPeriod: 10h0m0s
 garbageCollectorController:

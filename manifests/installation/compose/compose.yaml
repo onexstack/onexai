@@ -176,8 +176,6 @@ services:
     command:
       - --kubeconfig=/etc/onexai/declserver.kubeconfig
       - --config=/app/etc/oai-controller-manager.yaml
-      # DutyGroup has no declarative object to reconcile anymore.
-      - --controllers=-dutygroup
     configs:
       - source: decl-kubeconfig
         target: /etc/onexai/declserver.kubeconfig

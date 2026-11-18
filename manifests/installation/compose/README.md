@@ -47,7 +47,10 @@ docker compose --env-file env up -d --build
 ```
 
 The first build compiles every service from source and can take several
-minutes. Later starts reuse the images.
+minutes. Later starts reuse the images. On a machine with limited memory,
+`make compose.up.serial` (from the repository root) builds one service at a
+time and then starts the stack with `--no-build`, avoiding the parallel build
+that `up -d --build` triggers.
 
 Send a completion (the `agent` field is required; `default` selects the
 built-in assistant):
@@ -193,9 +196,11 @@ PostgreSQL initialisation runs only when `pgdata` is empty. After changing
   specification, not a configuration error, and neither `auth.proto` is used by
   these processes.
 - **Build killed with "cannot allocate memory"** — `docker compose build` runs
-  every service in parallel and each Go compiler is memory-hungry. Build one at
-  a time on a small Docker Desktop VM:
-  `COMPOSE_PARALLEL_LIMIT=1 docker compose --env-file env build`.
+  every service in parallel and each Go compiler is memory-hungry. On a small
+  Docker Desktop VM build one service at a time with `make compose.build.serial`
+  (or `make compose.up.serial` to build and start). Compose has no
+  `--jobs`/parallelism knob for `build`: it hands every service to BuildKit in a
+  single bake invocation, so `COMPOSE_PARALLEL_LIMIT` does not serialize it.
 - **declserver health** — compose probes `/healthz`. `/readyz` additionally
   gates on the aggregator's Service informer, which a standalone declserver
   does not serve, so it can stay 500 even though the control plane is usable.
@@ -238,6 +243,6 @@ GOPROXY=https://goproxy.cn,direct
 
 The working tree replaces `github.com/onexstack/onexstack` with `../onexstack`,
 which is outside the build context. The image build drops that replace and uses
-the released v1.0.8 that `go.mod` already requires; the only local difference is
+the released version that `go.mod` already requires; the only local difference is
 a log-noise suppression. `Dockerfile.dockerignore` excludes `_output` and the
 root-level build artefacts so the context does not carry several gigabytes.

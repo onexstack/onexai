@@ -84,8 +84,9 @@ global:
 # return error；agent 会因为 authz 没有规则源而拒绝启动）。
 #
 # 值班组（DutyGroup）不再属于这一段：它已改为 oai-chat-apiserver + PostgreSQL
-# 自有的命令式资源。declserver 通过 --runtime-config 停用 dutygroups，controller-
-# manager 通过 --controllers=-dutygroup 停用对应控制器；etcd 中的旧对象保留以便回滚。
+# 自有的命令式资源。declserver 通过 --runtime-config 停用 dutygroups；控制器的
+# 配置正文在 controllers 列表中写入 -dutygroup-controller（--config 存在时
+# --controllers flag 不生效）；etcd 中的旧对象保留以便回滚。
 #
 # 数据落在**集群 etcd** 上，靠 etcd.prefix 与 kube-apiserver 的 /registry 隔离。
 # 证书与 token 不进 git：由 manifests/installation/controlplane-certs.sh 生成到

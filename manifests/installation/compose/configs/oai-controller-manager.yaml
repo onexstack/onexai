@@ -21,6 +21,11 @@ generic:
   metricsBindAddress: 0.0.0.0:20251
   controllers:
     - '*'
+    # DutyGroup is retired: declserver stops serving the resource and the
+    # roster lives in PostgreSQL. Watching it would make the manager fail
+    # cache sync and restart forever. The entry must be the controller's
+    # canonical name; -dutygroup is only an alias accepted by the CLI flag.
+    - '-dutygroup-controller'
   parallelism: 16
   syncPeriod: 10h0m0s
 

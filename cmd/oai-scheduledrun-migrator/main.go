@@ -65,6 +65,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	// One-shot migration: it runs before any watcher exists and must see every
+	// ScheduledRun that was already created.
+	//nolint:kubelistcheck // one-shot migration must read live
 	list, err := client.AgentV1alpha1().ScheduledRuns(*namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "list scheduled runs: %v\n", err)

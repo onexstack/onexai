@@ -147,6 +147,7 @@ func (s *referenceGrantStore) all() ([]*agentv1alpha1.ReferenceGrant, error) {
 // caller uses it only on the refusal path, so the extra read costs nothing on
 // the ordinary path.
 func (s *referenceGrantStore) ListLive(ctx context.Context) ([]*agentv1alpha1.ReferenceGrant, error) {
+	//nolint:kubelistcheck // ListLive bypasses the informer by design
 	list, err := s.client.Clientset.AgentV1alpha1().ReferenceGrants(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err

@@ -35,6 +35,7 @@ func (c *Client) Namespaces(ctx context.Context) ([]string, error) {
 	if c == nil || c.KubeClient == nil {
 		return []string{}, nil
 	}
+	//nolint:kubelistcheck // documented live read; namespaces are few
 	list, err := c.KubeClient.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
