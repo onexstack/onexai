@@ -49,6 +49,11 @@ auth:
 # development profile turns it off; the secure profile seeds rules instead.
 authz:
   enabled: false
+  # The resource guard defaults to read-filter-enabled=true and write-mode=additive,
+  # both of which require authz.enabled=true. Turn it off with authorization.
+  resource-guard:
+    read-filter-enabled: false
+    write-mode: "off"
   # Path to an apiserver.config.k8s.io/v1 AuthorizationConfiguration. When set,
   # its webhook authorizers replace authz.webhook.endpoints.
   authorization-config: ""
