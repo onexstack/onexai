@@ -30,6 +30,11 @@ llm:
   base-url: https://api.openai.com/v1
   api-key: CHANGE_ME
   model: gpt-4.1-mini
+  # Optional extra request headers for a gateway that requires its own
+  # routing or admission header. Content-Type and Authorization are set by
+  # the client and cannot be replaced.
+  headers:
+    x-opencode-session: onexai
 
 agent:
   mcp-enabled: true
@@ -44,7 +49,8 @@ controlplane:
 
 The gateway exposes an OpenAI-compatible surface. API keys and per-agent policies are
 managed as declarative resources; `auth.control-token` optionally protects the admin
-routes.
+routes. `llm.headers` applies to the deployment's own model endpoint; a user-configured
+Model row keeps its own connection and does not inherit them.
 
 ### OIDC and Kubernetes structured authentication
 

@@ -29,6 +29,10 @@ llm:
   base-url: https://api.openai.com/v1
   api-key: CHANGE_ME
   model: gpt-4.1-mini
+  # 可选：网关要求的额外请求头（例如会话路由/准入头）。Content-Type 和
+  # Authorization 由客户端设置，不能在这里覆盖。
+  headers:
+    x-opencode-session: onexai
 
 agent:
   mcp-enabled: true
@@ -42,7 +46,8 @@ controlplane:
 ```
 
 网关提供 OpenAI 兼容接口。API Key 与按 Agent 的策略都是声明式资源；
-`auth.control-token` 可选地保护管理路由。
+`auth.control-token` 可选地保护管理路由。`llm.headers` 只作用于部署自身的模型端点；
+用户自建的 Model 行保持自己的连接，不会继承这些头。
 
 ### OIDC 与 Kubernetes 结构化认证
 
