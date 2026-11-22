@@ -363,7 +363,9 @@ func ProvideAgentBiz(
 	// any other, and leaving it uncapped would make the one call that only ever
 	// runs on an oversized context the one call with no bound on its bill.
 	summarize := agentbiz.NewSummarizer(chatmodel.NewOpenAIChatModel(
-		cfg.LLMBaseURL, cfg.LLMAPIKey, agentChatModel(cfg)).WithMaxTokens(cfg.LLMMaxTokens))
+		cfg.LLMBaseURL, cfg.LLMAPIKey, agentChatModel(cfg)).
+		WithHeaders(cfg.LLMHeaders).
+		WithMaxTokens(cfg.LLMMaxTokens))
 
 	// Say what the budget resolved to. A misspelled or absent config key decodes
 	// to zero rather than erroring, and zero means "no context management" — the

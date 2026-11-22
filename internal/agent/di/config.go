@@ -87,6 +87,9 @@ type Config struct {
 	LLMAPIKey string
 	// LLMModel is the model name for LLM requests.
 	LLMModel string
+	// LLMHeaders are extra HTTP headers sent with every deployment model
+	// request. See options.LLMOptions.Headers.
+	LLMHeaders map[string]string
 	// LLMMaxTokens caps one completion's output, or 0 for no cap of our own.
 	// Per-surface ceilings from agent.max-output-tokens override it; see
 	// handler.OutputCaps.

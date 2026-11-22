@@ -53,6 +53,9 @@ type OpenAIChatModel struct {
 	// maxTokens is the deployment's ceiling on one completion, or 0 for none.
 	// It is the last of the three sources outputCeiling consults.
 	maxTokens int
+	// headers are extra request headers a gateway requires, applied before the
+	// client's own Content-Type and Authorization so they cannot replace them.
+	headers map[string]string
 }
 
 // Ensure the interface is satisfied.
@@ -106,6 +109,19 @@ func (m *OpenAIChatModel) WithRetry(fallbackModel string, maxRetries int, backof
 func (m *OpenAIChatModel) WithMaxTokens(n int) *OpenAIChatModel {
 	cp := ptr.Clone(m)
 	cp.maxTokens = n
+	return cp
+}
+
+// WithHeaders returns a copy that sends headers with every request. It is the
+// escape hatch for a gateway whose admission or routing rule is a header the
+// OpenAI wire format does not define; the client still sets Content-Type and
+// Authorization last, so a configured header cannot replace the credential.
+func (m *OpenAIChatModel) WithHeaders(headers map[string]string) *OpenAIChatModel {
+	if len(headers) == 0 {
+		return m
+	}
+	cp := ptr.Clone(m)
+	cp.headers = headers
 	return cp
 }
 
@@ -500,6 +516,9 @@ func (m *OpenAIChatModel) do(ctx context.Context, input []*schema.Message, strea
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.baseURL+"/chat/completions", bytes.NewReader(raw))
 		if err != nil {
 			return nil, err
+		}
+		for key, value := range m.headers {
+			req.Header.Set(key, value)
 		}
 		req.Header.Set("Content-Type", "application/json")
 		if m.apiKey != "" {

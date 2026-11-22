@@ -98,7 +98,7 @@ func NewOpenAICompatibleModel(cfg options.ChatModelConfig) (*OpenAIChatModel, er
 		// nil-check in NewOpenAIChatModel stays honest for every caller.
 		return nil, fmt.Errorf("chatmodel: empty base URL for model %q", cfg.Model)
 	}
-	return m, nil
+	return m.WithHeaders(cfg.Headers), nil
 }
 
 // Inherit fills cfg's empty connection fields from base, so an auxiliary model
@@ -119,6 +119,9 @@ func Inherit(cfg, base options.ChatModelConfig) options.ChatModelConfig {
 	}
 	if cfg.Client == "" {
 		cfg.Client = base.Client
+	}
+	if len(cfg.Headers) == 0 {
+		cfg.Headers = base.Headers
 	}
 	return cfg
 }

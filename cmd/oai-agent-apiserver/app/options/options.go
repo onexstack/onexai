@@ -205,6 +205,7 @@ func (o *ServerOptions) Config() (*agent.Config, error) {
 		LLMBaseURL:               o.LLMOptions.BaseURL,
 		LLMAPIKey:                o.LLMOptions.APIKey,
 		LLMModel:                 o.LLMOptions.Model,
+		LLMHeaders:               o.LLMOptions.Headers,
 		LLMMaxTokens:             o.LLMOptions.MaxTokens,
 		LLMAllowPrivateEndpoints: o.LLMOptions.AllowPrivateEndpoints,
 		LLMTestTimeout:           o.LLMOptions.TestTimeout,

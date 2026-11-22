@@ -64,6 +64,12 @@ type ChatModelConfig struct {
 	// the server", which is why they are not given defaults.
 	Temperature float64 `json:"temperature" mapstructure:"temperature"`
 	TopP        float64 `json:"top-p" mapstructure:"top-p"`
+	// Headers are extra HTTP headers sent with every request built from this
+	// config. The OpenAI wire format defines none of them; they exist for
+	// gateways whose admission or routing rule is a header of their own (for
+	// example OpenCode's x-opencode-session). Content-Type and Authorization
+	// are set by the client and cannot be replaced here.
+	Headers map[string]string `json:"headers" mapstructure:"headers"`
 }
 
 // Enabled reports whether this optional endpoint is configured.
