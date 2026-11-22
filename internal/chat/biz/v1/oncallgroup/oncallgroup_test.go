@@ -35,12 +35,17 @@ import (
 type stubGroupStore struct {
 	store.OncallGroupStore
 	getByName   func(context.Context, string) (*model.OncallGroupM, error)
+	listAll     func(context.Context) ([]*model.OncallGroupM, error)
 	createErr   error
 	createCalls int
 }
 
 func (s *stubGroupStore) GetByName(ctx context.Context, name string) (*model.OncallGroupM, error) {
 	return s.getByName(ctx, name)
+}
+
+func (s *stubGroupStore) ListAll(ctx context.Context) ([]*model.OncallGroupM, error) {
+	return s.listAll(ctx)
 }
 
 func (s *stubGroupStore) Create(context.Context, *model.OncallGroupM) error {
@@ -54,6 +59,24 @@ type stubStore struct {
 }
 
 func (s *stubStore) OncallGroups() store.OncallGroupStore { return s.groups }
+
+// An empty roster must encode as [] rather than null: the console reads a bare
+// list endpoint directly, and a nil slice marshals to null, which its list
+// loader cannot index.
+func TestListReturnsAnEmptySliceNotEmptyNull(t *testing.T) {
+	groups := &stubGroupStore{
+		listAll: func(context.Context) ([]*model.OncallGroupM, error) {
+			return nil, nil
+		},
+	}
+	b := New(&stubStore{groups: groups})
+
+	got, err := b.List(context.Background(), &api.ListOncallGroupQuery{})
+
+	require.NoError(t, err)
+	require.NotNil(t, got, "an empty list must encode as [] not null")
+	assert.Empty(t, got)
+}
 
 func TestCreateInsertsAFreshName(t *testing.T) {
 	groups := &stubGroupStore{
