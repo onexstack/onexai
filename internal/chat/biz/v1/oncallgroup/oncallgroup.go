@@ -158,5 +158,10 @@ func (b *oncallGroupBiz) List(ctx context.Context, _ *api.ListOncallGroupQuery) 
 	if err != nil {
 		return nil, storeerr.Read(err)
 	}
+	// A nil slice marshals to null, and this endpoint answers a bare list: the
+	// console reads it directly. An empty roster is [] rather than null.
+	if groups == nil {
+		groups = []*api.OncallGroup{}
+	}
 	return groups, nil
 }

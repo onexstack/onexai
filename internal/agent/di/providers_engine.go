@@ -164,7 +164,8 @@ func buildFailover(cfg *Config) *agentbuilder.Failover {
 					"fallback model %q is not usable: no base URL configured", fallbackID)
 				return
 			}
-			fallback = m.WithMaxTokens(cfg.LLMMaxTokens).
+			fallback = m.WithHeaders(cfg.LLMHeaders).
+				WithMaxTokens(cfg.LLMMaxTokens).
 				WithRetry("", agentMaxRetries(cfg), agentRetryBackoff(cfg))
 		})
 		return fallback, buildErr
@@ -276,7 +277,8 @@ func ProvideAgentEngine(
 	// exactly once. It is built first because the tool set below depends on it.
 	chatModel := chatmodel.NewOpenAIChatModel(cfg.LLMBaseURL, cfg.LLMAPIKey, agentChatModel(cfg))
 	if chatModel != nil {
-		chatModel = chatModel.WithRetry(agentFallbackModel(cfg), agentMaxRetries(cfg), agentRetryBackoff(cfg)).
+		chatModel = chatModel.WithHeaders(cfg.LLMHeaders).
+			WithRetry(agentFallbackModel(cfg), agentMaxRetries(cfg), agentRetryBackoff(cfg)).
 			WithMaxTokens(cfg.LLMMaxTokens)
 	}
 	// The graph's model retries the same model only: degrading to another one is
@@ -500,6 +502,7 @@ func auxModelConfig(cfg *Config, model *customoptions.ChatModelConfig) customopt
 		Provider: chatmodel.InferProvider(agentChatModel(cfg)),
 		BaseURL:  cfg.LLMBaseURL,
 		APIKey:   cfg.LLMAPIKey,
+		Headers:  cfg.LLMHeaders,
 	})
 }
 
@@ -511,6 +514,7 @@ func primaryModelConfig(cfg *Config) customoptions.ChatModelConfig {
 		Model:    name,
 		BaseURL:  cfg.LLMBaseURL,
 		APIKey:   cfg.LLMAPIKey,
+		Headers:  cfg.LLMHeaders,
 	}
 }
 

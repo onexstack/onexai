@@ -90,6 +90,12 @@ llm:
   # A user-configured endpoint is fetched by this process. Private/loopback
   # targets are refused unless this is enabled (e.g. a self-hosted Ollama).
   allow-private-endpoints: false
+  # Extra HTTP headers sent with every deployment model request, for a gateway
+  # that requires routing or admission headers of its own (e.g. OpenCode's
+  # x-opencode-session). Content-Type and Authorization are set by the client
+  # and cannot be replaced. Example:
+  # headers:
+  #   x-opencode-session: onexai
   # Bounds one connectivity test of a user endpoint.
   test-timeout: "15s"
 

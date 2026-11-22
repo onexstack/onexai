@@ -47,6 +47,16 @@ type LLMOptions struct {
 	AllowPrivateEndpoints bool `json:"allow-private-endpoints" mapstructure:"allow-private-endpoints"`
 	// TestTimeout bounds one connectivity test of a user-configured endpoint.
 	TestTimeout time.Duration `json:"test-timeout" mapstructure:"test-timeout"`
+	// Headers are extra HTTP headers sent with every deployment model request.
+	// They are the escape hatch for an OpenAI-compatible gateway that requires a
+	// routing or admission header the wire format does not define. Empty sends
+	// none; Content-Type and Authorization are set by the client and cannot be
+	// replaced here. Configure this in the service YAML, e.g.
+	//
+	//	llm:
+	//	  headers:
+	//	    x-opencode-session: onexai
+	Headers map[string]string `json:"headers" mapstructure:"headers"`
 }
 
 // NewLLMOptions creates a LLMOptions with default values.
