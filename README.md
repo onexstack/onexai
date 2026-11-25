@@ -13,6 +13,10 @@ OneX 智能体平台（简称：onexai，也称 OneX AI）是一个企业级的�
 >- OneX AI 采用的 Harness AI Coding 工具：[OneX Harness AI Coding 实战课](https://onex.feizaonet.com/product/prd-r3tmnt)
 >- OneX AI 采用采用了课程：[Kubernetes 源码剖析与实战](https://onex.feizaonet.com/product/prd-course-k8s-source) 中的很多设计理念和方法
 
+项目介绍文档：
+- [企业智能化改造：介绍一个智能体平台的设计和实现方式](https://mp.weixin.qq.com/s/luj-vH7mrdj1yQeSKzscQA)
+- [把 Agent 搬进飞书：飞书 Agent 机器人演示](https://mp.weixin.qq.com/s/u20tF5M-7pgfqKwrgbR4dQ)
+
 ![OneX AI 界面](./docs/images/onexai.png)
 
 ## 功能特性
